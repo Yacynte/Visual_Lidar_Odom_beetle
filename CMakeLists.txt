@@ -38,7 +38,6 @@ include_directories(${OpenCV_INCLUDE_DIRS} include /usr/local/include)
 
 # Build a shared library
 add_library(VisualOdometry SHARED
-    src/visualodom.cpp
     src/vo_process.cpp
     src/visualodom_tcp.cpp
     # visual odometry implementation

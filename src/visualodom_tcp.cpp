@@ -93,15 +93,7 @@ int main( int c, char** argv) {
     cv::Mat t_global = cv::Mat::zeros(3, 1, CV_64F);
 
     // Initialize a vector to hold the relative poses
-    struct RelativePose {
-        cv::Mat R, t;
-        bool valid = false;
-    };
-
-    struct CountourPose {
-        cv::Mat R, t;
-        int position;
-    };
+    
     std::cout << "Starting to at cliend: " << client_fd << std::endl;
     while (true){
 
@@ -111,18 +103,25 @@ int main( int c, char** argv) {
         // cv::Mat tot_translation_vector = cv::Mat::zeros(3, 1, CV_32F);
 
         // Compute odometry asychronously
-        auto compute_rel_pose = [&](std::string pre_image, std::string current_image, RelativePose* rel_pose) {
-            cv::Mat right_cur, left_cur, right_pre, left_pre;
+        auto compute_rel_pose = [&](std::string pre_image, std::string current_image, RelativePose* rel_pose, 
+                                CountourPose* contour_pose, int rel_index) {
+            cv::Mat right_cur, left_cur, right_pre, left_pre, left_pre_color;
 
             try {
                 // std::cout << "Loading: " << left_folder+pre_image+".png" << std::endl;
                 // std::cout << "Loading: " << right_folder+pre_image+".png" << std::endl;
 
-                left_pre = cv::imread(left_folder+pre_image+".png", cv::IMREAD_GRAYSCALE);
-                right_pre = cv::imread(right_folder+pre_image+".png", cv::IMREAD_GRAYSCALE);
+                left_pre = cv::imread(left_folder + pre_image+".png", cv::IMREAD_GRAYSCALE);
+                right_pre = cv::imread(right_folder + pre_image+".png", cv::IMREAD_GRAYSCALE);
 
-                left_cur = cv::imread(left_folder+current_image+".png", cv::IMREAD_GRAYSCALE);
-                right_cur = cv::imread(right_folder+current_image+".png", cv::IMREAD_GRAYSCALE);
+                left_cur = cv::imread(left_folder + current_image+".png", cv::IMREAD_GRAYSCALE);
+                right_cur = cv::imread(right_folder + current_image+".png", cv::IMREAD_GRAYSCALE);
+
+                left_pre_color = cv::imread(left_folder + current_image+".png");
+                // right_pre = cv::imread(right_folder+pre_image+".png");
+
+                // left_cur = cv::imread(left_folder+current_image+".png");
+                // right_cur = cv::imread(right_folder+current_image+".png");
             }
             catch (const std::exception& e) {
                 std::cerr << "Error loading images: " << e.what() << std::endl;
@@ -132,11 +131,16 @@ int main( int c, char** argv) {
             // std::cout << "Previous image timestamp: "<< pre_image << std::endl;
             cv::Mat rp;
             cv::Mat rel_R, rel_t;
+            // std::vector<cv::Point3f> contour_poses;
             try{
-                if (vo.StereoOdometry(left_pre, left_cur, right_pre, right_cur, rel_R, rel_t)) {
+                if (vo.StereoOdometry(left_pre_color, left_pre, left_cur, right_pre, right_cur, rel_R, rel_t, contour_pose)) {
                     cv::Rodrigues(rel_R, rp);
                     // std::cout << "Calculated relative pose: " << rel_t << std::endl;
                     rel_pose->valid = true;
+                    if(contour_pose->valid) {
+                        contour_pose->position = rel_index; // Store the position index
+                    }
+                    
                 }
                 else {
                     std::cerr << "StereoOdometry failed for images: " << pre_image << " and " << current_image << std::endl;
@@ -144,6 +148,19 @@ int main( int c, char** argv) {
                 }
                 rel_pose->R = rp;
                 rel_pose->t = rel_t;
+
+                std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
+                if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers) && !contour_pose->valid) {
+                    // std::cout << "Detected markers in frame pair: " << i << " and " << i + step << std::endl;
+                    // Estimate pose of the markers
+                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose->R, contour_pose->t);
+                    contour_pose->position = rel_index; // Store the position index
+                    contour_pose->valid = true;
+                    
+                }
+                else {
+                    contour_pose = nullptr; // No markers detected, set to nullptr
+                }
             }
             catch (const cv::Exception& e) {
                 std::cerr << "Error in StereoOdometry: " << e.what() << std::endl;
@@ -180,7 +197,7 @@ int main( int c, char** argv) {
         std::vector<RelativePose> rel_poses;
         std::vector<CountourPose> contour_poses;
         rel_poses.resize(int(j.size())-1);  // Resize to hold all relative poses
-        // contour_poses.resize(int(j.size()));
+        contour_poses.resize(int(j.size())-1);  // Resize to hold all contour poses except the first one
         // CountourPose contour_pose;
         for (const auto& [timestamp, value] : j.items()) {
             bool detected = value.get<bool>();
@@ -193,14 +210,14 @@ int main( int c, char** argv) {
             else{
                 // RelativePose rel_pose;
                 // Compute the relative pose between the previous and current timestamp
-                threads.emplace_back(compute_rel_pose, pre_timestamp, timestamp, &rel_poses[rel_index]);
+                threads.emplace_back(compute_rel_pose, pre_timestamp, timestamp, &rel_poses[rel_index], &contour_poses[rel_index], rel_index);
                 // Limit concurrent threads
                 if (threads.size() >= num_threads) {
                     for (auto& t : threads) t.join();
                     threads.clear();
                 }
                 // rel_poses.push_back(rel_pose);
-                if (detected) {
+                if (!(contour_poses[rel_index].R.empty() && contour_poses[rel_index].t.empty())) {
                     // contour_pose.R, contour_pose.t = findContoursAndPose(timestamp);
                     // contour_poses[irr].position = irr;
                     // contour_poses.push_back(CountourPose());
@@ -212,28 +229,7 @@ int main( int c, char** argv) {
         }
         // Join remaining threads
         for (auto& t : threads) t.join();
-        std::cout << "Third poses: " << rel_poses[3].R << std::endl;
-
-        // Send back a JSON response
-        // json pose 
-        // for (const auto& rp : rel_poses) {
-        //     // if (rp.valid) {
-        //     // Convert rotation matrix to Rodrigues vector
-        //     // cv::Mat rvec;
-        //     // cv::Rodrigues(rp.R, rvec);
-        //     // pose["rotation"] = {{"x", rp.R[0]}, {"y", rp.R[1]}, {"z", rp.R[2]}};
-        //     pose["translation"] = {{"x", rp.t.at<double>(0)}, {"y", rp.t.at<double>(1)}, {"z", rp.t.at<double>(2)}};
-        //     pose["rotation"] = {{"x", rp.R.at<double>(0)}, {"y", rp.R.at<double>(1)}, {"z", rp.R.at<double>(2)}};
-        //     // pose["rotation"] = {{"x", rvec.at<double>(0)}, {"y", rvec.at<double>(1)}, {"z", rvec.at<double>(2)}};
-        //     // pose["translation"] = {{"x", rp.t.at<double>(0)}, {"y", rp.t.at<double>(1)}, {"z", rp.t.at<double>(2)}};
-
-        // }
-        // json pose 
-        // for (const auto& cp : contour_poses) {
-        //     pose["contour_position"] = {{"x", cp.t.at<double>(0)}, {"y", cp.t.at<double>(1)}, {"z", cp.t.at<double>(2)}};
-        //     pose["contour_rotation"] = {{"x", cp.R.at<double>(0)}, {"y", cp.R.at<double>(1)}, {"z", cp.R.at<double>(2)}};
-        //     pose["contour_position_index"] = cp.position;
-        // }
+        // std::cout << "Third poses: " << rel_poses[3].R << std::endl;
 
         json pose_array = json::array();  // holds all pose entries
         json contour_array = json::array();
@@ -241,8 +237,7 @@ int main( int c, char** argv) {
         json countour_entry;
         if (!contour_poses.empty()) {
             for (const auto& cp : contour_poses) {
-        // for (const auto& cp : contour_poses) {
-        //     if (!cp.t.empty() && cp.t.type() == CV_64F && cp.t.total() >= 3) {
+                if (!cp.valid) continue;  // Skip invalid poses
                 countour_entry["contour_position"] = {
                     {"x", cp.t.at<double>(0)},
                     {"y", cp.t.at<double>(1)},
@@ -255,7 +250,10 @@ int main( int c, char** argv) {
                 };
                 countour_entry["contour_position_index"] = cp.position;
             }
-            contour_array.push_back(countour_entry);  // add to array
+            if (!countour_entry.empty()) {
+                contour_array.push_back(countour_entry);  // add to array  
+            } 
+            
         }
         full_json["contour_poses"] = contour_array; // wrap contour poses in an json object
 
@@ -285,49 +283,7 @@ int main( int c, char** argv) {
 
         std::cout<< "Sent poses to GUI with size: " << response.size()  << std::endl;
     }
-    //     // std::cout << "Total loop: " <<old_frames + total_frames<<std::endl;
-    //     // std::cout << " Old frames: " << old_frames <<std::endl;
-    //     for (int i = std::max(0, old_frames); i < old_frames + total_frames - skip; i+= skip) {
-    //         threads.emplace_back(compute_rel_pose, i, skip);
-    //         // std::cout << "Processing frame pair: " << i << " and " << i + skip << std::endl;
 
-    //         // Limit concurrent threads
-    //         if (threads.size() >= num_threads) {
-    //             for (auto& t : threads) t.join();
-    //             threads.clear();
-    //         }
-    //         last_img_set = i + skip;
-    //     }
-    //     if ( left_image_paths.size() - last_img_set <= skip) threads.emplace_back(compute_rel_pose, last_img_set, skip);
-
-    //     // Join remaining threads
-    //     for (auto& t : threads) t.join();
-    //     // std::cout << "Joined threads \n";
-    //     // R_global = cv::Mat::eye(3, 3, CV_64F);
-    //     // t_global = cv::Mat::zeros(3, 1, CV_64F);
-
-    //     for (int i = std::max(0, int(old_frames/skip)); i <= rel_poses.size()-1; ++i) {
-    //         if (!rel_poses[i].valid) continue;
-
-    //         // t' = t + R * t_i
-    //         t_global += R_global * rel_poses[i].t;
-    //         // R' = R * R_i
-    //         R_global = R_global * rel_poses[i].R;
-            
-    //         // std::cout << "Updating pose for frame pair: " << i << " and " << i + 1 << std::endl;
-    //     }
-
-    //     old_frames = last_img_set;
-    // }
-
-    // std::cout << "  Translation: " << t_global.t() << "\n";
-    // std::cout << "  Rotation:\n" << R_global << "\n";
-
-    // auto end = std::chrono::high_resolution_clock::now();
-    // std::chrono::duration<double> elapsed = end - start;
-    // std::cout << "Elapsed time: " << elapsed.count() << " seconds" << std::endl;
-    
-    // Print the final translation and rotation
     std::cout << "Finished processing all image pairs." << std::endl;
 
     return 0;

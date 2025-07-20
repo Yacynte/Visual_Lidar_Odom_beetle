@@ -86,11 +86,12 @@ int main( int c, char** argv) {
     cv::Mat t_global = cv::Mat::zeros(3, 1, CV_64F);
 
     // Initialize a vector to hold the relative poses
-    struct RelativePose {
-        cv::Mat R, t;
-        bool valid = false;
-    };
+    // struct RelativePose {
+    //     cv::Mat R, t;
+    //     bool valid = false;
+    // };
     std::vector<RelativePose> rel_poses;
+
     int last_img_set = 0;
     // std::cout << "before while loop "<< std::endl;
     std::cout << "Number of images : " << left_image_paths.size() << std::endl;
@@ -115,7 +116,7 @@ int main( int c, char** argv) {
         // std::cout<<"rel_pose resized \n";
 
         auto compute_rel_pose = [&](int i, int step) {
-            cv::Mat right_cur, left_cur; bool isLast = false;
+            cv::Mat right_cur, left_cur, left_cur_color; bool isLast = false;
             cv::Mat left_pre = cv::imread(left_image_paths[i].string(), cv::IMREAD_GRAYSCALE);
             cv::Mat right_pre = cv::imread(right_image_paths[i].string(), cv::IMREAD_GRAYSCALE);
 
@@ -123,25 +124,35 @@ int main( int c, char** argv) {
                 int last = left_image_paths.size() -1;
                 left_cur = cv::imread(left_image_paths[last].string(), cv::IMREAD_GRAYSCALE);
                 right_cur = cv::imread(right_image_paths[last].string(), cv::IMREAD_GRAYSCALE);
+                left_cur_color = cv::imread(left_image_paths[last].string());
                 isLast = true;
             }
             else{
                 left_cur = cv::imread(left_image_paths[i + step].string(), cv::IMREAD_GRAYSCALE);
                 right_cur = cv::imread(right_image_paths[i + step].string(), cv::IMREAD_GRAYSCALE);
+                left_cur_color = cv::imread(left_image_paths[i + step].string());
             }
 
         
             if (!left_pre.empty() && !left_cur.empty() && !right_pre.empty() && !right_cur.empty()) {
                 RelativePose rp;
                 cv::Mat r;
-                if (vo.StereoOdometry(left_pre, left_cur, right_pre, right_cur, r, rp.t)) {
+                CountourPose contour_pose;
+                if (vo.StereoOdometry(left_cur_color, left_pre, left_cur, right_pre, right_cur, r, rp.t, &contour_pose)) {
                     cv::Rodrigues(r, rp.R);
                     rel_poses[int(i/skip)] = rp;
                     rel_poses[int(i/skip)].valid = true;
                     // std::cout << "Processing frame pair: " << i << " and " << i + step << std::endl;
                     std::cout << "rel pose for frame "<< i << " to frame "<<  i + skip <<": " << rp.t.t() <<std::endl;
                 }
-                if (vo.detectArucoMarkers())
+                std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
+                RelativePose marker_pose;
+                if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers)) {
+                    // std::cout << "Detected markers in frame pair: " << i << " and " << i + step << std::endl;
+                    // Estimate pose of the markers
+                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, marker_pose.R, marker_pose.t);
+                    marker_pose.valid = true;
+                }
             }
         };
 

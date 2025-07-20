@@ -35,6 +35,21 @@
 #include <opencv2/features2d.hpp>
 // #include <opencv2/xfeatures2d.hpp>
 
+struct MarkerInfo {
+            int id;
+            std::vector<cv::Point2f> corners;
+        };
+
+struct RelativePose {
+        cv::Mat R, t;
+        bool valid = false;
+    };
+
+struct CountourPose {
+        cv::Mat R, t;
+        int position;
+        bool valid = false;
+    };
 
 class VisualOdometry {
     public:
@@ -48,30 +63,37 @@ class VisualOdometry {
             K1.convertTo(K1_float, CV_32F);
             D1.convertTo(D1_float, CV_32F);
         }
-        struct MarkerInfo {
-            int id;
-            std::vector<cv::Point2f> corners;
-        };
+        
         // Method to compute stereo odometry
-        bool StereoOdometry(cv::Mat preLeftImage, cv::Mat curLeftImage, cv::Mat preRightImage, cv::Mat curRightImage, cv::Mat& rotation_vector, cv::Mat& translation_vector); //, cv::Mat init_R, cv::Mat init_T);
+        bool StereoOdometry(cv::Mat leftImage_color, cv::Mat preLeftImage, cv::Mat curLeftImage, cv::Mat preRightImage, cv::Mat curRightImage, 
+                            cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose); //, cv::Mat init_R, cv::Mat init_T);
 
         void updatePose(cv::Mat& tot_translation_vector, cv::Mat& tot_rotation_vector,  cv::Mat& rel_translation_vector, cv::Mat& rel_rotation_vector);
 
 
-        std::map<int, MarkerInfo> detectArucoMarkers(const cv::Mat& image);
+        bool detectArucoMarkers(const cv::Mat& image, std::map<int, MarkerInfo>& detectedMarkers);
 
-        void estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight, const std::vector<std::vector<cv::Point2f>>& corners,
-                                const std::vector<int>& ids, cv::Mat& rvec, cv::Mat& tvec);
+        bool detectContourMarkers(const cv::Mat& image, std::vector<cv::Point2f>& contourPoints);
+
+        void estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight,
+                                std::vector<cv::Point2f>& contourPoints,
+                                cv::Mat& rvec, cv::Mat& tvec);
+
+        void estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight,
+                                std::map<int, MarkerInfo>& detectedLeftMarkers,
+                                std::map<int, MarkerInfo>& detectedRightMarkers,
+                                cv::Mat& rvec, cv::Mat& tvec);
 
     private:
 
         // Match corners based on shared marker IDs
-        std::vector<std::pair<cv::Point2f, cv::Point2f>> matchMarkerCorners(
+        std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> matchMarkerCorners(
             const std::map<int, MarkerInfo>& leftMarkers, const std::map<int, MarkerInfo>& rightMarkers);
                 
         // Motion estimation from two sets of 2D points and depth map.
-        bool motionEstimation(const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
-        const cv::Mat& depth, cv::Mat& rotation_vector, cv::Mat& translation_vector, float max_depth = 500.0f);
+        bool motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
+                            const cv::Mat& depth, cv::Mat& rotation_vector, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
+                            CountourPose* contour_pose, float max_depth = 500.0f);
 
 
         cv::Mat K1 = (cv::Mat_<double>(3, 3) << 9.597910e+02, 0, 6.960217e+02,
@@ -146,7 +168,7 @@ class VisualOdometry {
 
         std::vector<int> markerIds;
         std::vector<std::vector<cv::Point2f>> markerCorners, rejectedCandidates;
-        std::map<int, MarkerInfo> detectedMarkers;
+        
         
         cv::aruco::Dictionary dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_250);
        // Optional: Detector parameters (can be fine-tuned)

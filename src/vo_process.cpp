@@ -3,19 +3,20 @@
 
 
 
-bool VisualOdometry::StereoOdometry(cv::Mat leftImage_pre_, cv::Mat leftImage_cur_, cv::Mat rightImage_pre_, cv::Mat rightImage_cur_, 
-                                    cv::Mat& rotation_vector, cv::Mat& translation_vector) {
+bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre_, cv::Mat leftImage_cur_, cv::Mat rightImage_pre_, cv::Mat rightImage_cur_, 
+                                    cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
 
 // bool VisualOdometry::StereoOdometry(cv::Mat leftImage_pre, cv::Mat leftImage_cur, cv::Mat rightImage_pre, cv::Mat rightImage_cur, 
 //                                             cv::Mat& rotation_vector, cv::Mat& translation_vector) {
 
     if (leftImage_pre_.empty() || leftImage_cur_.empty() || rightImage_pre_.empty() || rightImage_cur_.empty()) {
         std::cerr << "One or all images are Empty!" << std::endl;
-        UnityLog("One or all images are Empty!");
+        // UnityLog("One or all images are Empty!");
         // Initialize rotation and translation vectors to -1
         cv::Mat rotation_vector = cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
         cv::Mat translation_vector =cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
     }
+
     // Half the image size
     int new_width = leftImage_pre_.cols / 2;
     int new_height = leftImage_pre_.rows / 2;
@@ -41,7 +42,6 @@ bool VisualOdometry::StereoOdometry(cv::Mat leftImage_pre_, cv::Mat leftImage_cu
     auto depth_map = computeDepth(leftImage_pre, rightImage_pre);
     
     // Vectors to hold the matched points
-    // std::cout<<"Init 2d points"<<std::endl;
     std::vector<cv::Point2f> pts_prev_L, pts_cur_L;
 
     // Call the feature matching function
@@ -52,7 +52,7 @@ bool VisualOdometry::StereoOdometry(cv::Mat leftImage_pre_, cv::Mat leftImage_cu
     // std::string message = "Number of matching points: " + std::to_string(num_matching);
     // UnityLog(message.c_str());
     // std::cout<<"Motion Estimation"<<std::endl;
-    bool state = motionEstimation(pts_prev_L, pts_cur_L, depth_map, rotation_vector, translation_vector);
+    bool state = motionEstimation(leftImage_color, pts_prev_L, pts_cur_L, depth_map, rotation_vector, translation_vector, leftImage_cur_, contour_pose);
     
     return state;
 }
@@ -120,11 +120,11 @@ cv::Point3f VisualOdometry::computeMean3D(const std::vector<cv::Point3f>& points
     return mean;
 }
 
-bool VisualOdometry::motionEstimation(const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
-    const cv::Mat& depth, cv::Mat& rvec, cv::Mat& translation_vector, float max_depth) {
+bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
+                                        const cv::Mat& depth, cv::Mat& rvec, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
+                                        CountourPose* contour_pose, float max_depth) {
     if (image1_points.size() != image2_points.size()) {
         std::cerr << "Error: Point sets must have the same size." << std::endl;
-        UnityLog("Error: Point sets must have the same size.");
         return false;
     }
 
@@ -133,6 +133,16 @@ bool VisualOdometry::motionEstimation(const std::vector<cv::Point2f>& image1_poi
     std::vector<size_t> outliers;
     reconstruct3D(image1_points, depth, points_3D, outliers, max_depth);
 
+    std::vector<cv::Point2f> contourPoses2d;
+    std::vector<cv::Point3f> contourPoses;
+    // if(detectContourMarkers(leftImage_cur_, contourPoses2d)){
+    //     reconstruct3D(contourPoses2d, depth, contourPoses, outliers, max_depth);
+    //     cv::Point3f meanPose = computeMean3D(contourPoses);
+    //     contour_pose->R = cv::Mat::eye(3, 3, CV_32F);
+    //     contour_pose->t = cv::Mat(meanPose);
+    //     contour_pose->valid = true;
+    // }
+    
     // Step 2: Use an unordered_set for fast outlier lookup
     std::unordered_set<size_t> outlier_set(outliers.begin(), outliers.end());
 
@@ -144,15 +154,6 @@ bool VisualOdometry::motionEstimation(const std::vector<cv::Point2f>& image1_poi
     filtered_image2_points.reserve(image2_points.size());
     filtered_points_3D.reserve(points_3D.size());
 
-    // UnityLog("length of image1_points: ");
-    // UnityLog(std::to_string(image1_points.size()).c_str());
-    // UnityLog("length of image2_points: ");
-    // UnityLog(std::to_string(image2_points.size()).c_str());
-    // UnityLog("length of points_3D: ");
-    // UnityLog(std::to_string(points_3D.size()).c_str());
-    // UnityLog("length of outliers: ");
-    // UnityLog(std::to_string(outliers.size()).c_str());
-    // std::cout << "length of image1_points: " << image1_points.size() << std::endl;
 
     for (size_t i = 0; i < num_points; ++i) {
         if (outlier_set.find(i) == outlier_set.end()) {
@@ -179,10 +180,7 @@ bool VisualOdometry::motionEstimation(const std::vector<cv::Point2f>& image1_poi
     std::vector<int> inliers ;
     bool success = cv::solvePnPRansac(points_3D_mat, filtered_image2_points_mat, K1_float, D1_float,
                                     rvec, translation_vector, false, 100, 8.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
-    
-    // std::string message3 = "Inliers size: " + std::to_string(inliers.size());
-    // UnityLog(message3.c_str());
-    // std::cout << "Inliers size: " << inliers.size() << std::endl;
+   
     
     return success;
     
@@ -469,7 +467,8 @@ void VisualOdometry::filterKeypointsByGrid(const cv::Mat& image, const std::vect
 }
 
 // Detect ArUco markers and return map from ID to corners
-std::map<int, VisualOdometry::MarkerInfo> VisualOdometry::detectArucoMarkers(const cv::Mat& image) {
+// std::map<int, VisualOdometry::MarkerInfo> 
+bool VisualOdometry::detectArucoMarkers(const cv::Mat& image, std::map<int, MarkerInfo>& detectedMarkers) {
 
     cv::aruco::ArucoDetector detector(dictionary, parameters);
     detector.detectMarkers(image, markerCorners, markerIds, rejectedCandidates);
@@ -478,14 +477,18 @@ std::map<int, VisualOdometry::MarkerInfo> VisualOdometry::detectArucoMarkers(con
         detectedMarkers[markerIds[i]] = { markerIds[i], markerCorners[i] };
     }
 
-    return detectedMarkers;
+    bool hasMarkers = !detectedMarkers.empty();
+
+    return hasMarkers;
 }
 
 // Match corners based on shared marker IDs
-std::vector<std::pair<cv::Point2f, cv::Point2f>> VisualOdometry::matchMarkerCorners( const std::map<int, MarkerInfo>& leftMarkers, 
+std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> VisualOdometry::matchMarkerCorners( const std::map<int, MarkerInfo>& leftMarkers, 
                                                                                     const std::map<int, MarkerInfo>& rightMarkers) 
 {
-    std::vector<std::pair<cv::Point2f, cv::Point2f>> matchedPoints;
+    // std::vector<std::pair<cv::Point2f, cv::Point2f>> matchedPoints;
+    std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> matchedPoints;
+    std::vector<cv::Point2f> leftCorners, rightCorners;
 
     for (const auto& [id, leftMarker] : leftMarkers) {
         auto it = rightMarkers.find(id);
@@ -493,39 +496,66 @@ std::vector<std::pair<cv::Point2f, cv::Point2f>> VisualOdometry::matchMarkerCorn
             const auto& rightMarker = it->second;
             // Match all 4 corners (assuming order is preserved)
             for (int i = 0; i < 4; ++i) {
-                matchedPoints.emplace_back(leftMarker.corners[i], rightMarker.corners[i]);
+                // matchedPoints.emplace_back(leftMarker.corners[i], rightMarker.corners[i]);
+                leftCorners.push_back(leftMarker.corners[i]);
+                rightCorners.push_back(rightMarker.corners[i]);
             }
         }
     }
+    matchedPoints.first = leftCorners;
+    matchedPoints.second = rightCorners;
 
     return matchedPoints;
 }
 
 void VisualOdometry::estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight,
-                                         const std::vector<std::vector<cv::Point2f>>& corners,
-                                         const std::vector<int>& ids, cv::Mat& rvec, cv::Mat& tvec) {
-    if (ids.empty() || corners.empty()) {
-        std::cerr << "No markers " << std::endl;
-        return;
-    }
-    // Detect markers in both images
-    auto leftMarkers = detectArucoMarkers(imageLeft);
-    auto rightMarkers = detectArucoMarkers(imageRight);
+                                        std::map<int, MarkerInfo>& detectedLeftMarkers,
+                                        std::map<int, MarkerInfo>& detectedRightMarkers,
+                                        cv::Mat& rvec, cv::Mat& tvec) {
 
-    auto matchedPoints = matchMarkerCorners(leftMarkers, rightMarkers);
 
-    std::cout << "Matched ARCO Points: " << matchedPoints.size() << "\n";
+    auto matchedPoints = matchMarkerCorners(detectedLeftMarkers, detectedRightMarkers);
+
+    // std::cout << "Matched ArUCo Points: " << matchedPoints.size() << "\n";
 
     // Estimate pose for each marker
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (ids[i] < 0) continue; // Skip invalid IDs
+    for (size_t i = 0; i < detectedRightMarkers.size(); ++i) {
         // Estimate pose of the marker
-        cv::aruco::estimatePoseSingleMarkers(corners[i], 0.05, K1_float, D1_float, rvec, tvec);
+        // cv::aruco::estimatePoseSingleMarkers(corners[i], 0.05, K1_float, D1_float, rvec, tvec);
 
-        std::vector<cv::Point2f> imagePoints = corners[i]; // from ArUco detection
-
+        std::vector<cv::Point2f> leftImagePoints = matchedPoints.first; // from ArUco detection
+        std::vector<cv::Point2f> RightImagePoints = matchedPoints.second; 
         
-        cv::solvePnPRansac(aruco_objectPoints, corners[i], K1_float, D1_float, rvec, tvec);
+        cv::solvePnPRansac(aruco_objectPoints, leftImagePoints, K1_float, D1_float, rvec, tvec);
+
 
     }
+}
+
+
+bool VisualOdometry::detectContourMarkers(const cv::Mat& image, std::vector<cv::Point2f>& contourPoints) {
+    // Convert to HSV for better red detection
+    cv::Mat hsv;
+    cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
+    std::vector<std::vector<cv::Point>> contoursOut;
+
+    // Define lower and upper bounds for red in HSV (wraps around hue = 0)
+    cv::Mat mask1, mask2;
+    cv::inRange(hsv, cv::Scalar(0, 100, 100), cv::Scalar(10, 255, 255), mask1);   // lower reds
+    cv::inRange(hsv, cv::Scalar(160, 100, 100), cv::Scalar(180, 255, 255), mask2); // upper reds
+
+    cv::Mat redMask = mask1 | mask2;
+
+    // Optional: Morphological operations to clean mask
+    cv::morphologyEx(redMask, redMask, cv::MORPH_OPEN, cv::Mat(), cv::Point(-1,-1), 2);
+
+    // Detect contours
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(redMask, contoursOut, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    for (const auto& pt : contoursOut[0]) {
+        contourPoints.push_back(cv::Point2f(pt.x, pt.y));
+    }
+
+    return !contoursOut.empty();
 }
