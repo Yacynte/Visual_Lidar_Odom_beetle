@@ -3,32 +3,33 @@
 
 
 
-bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre_, cv::Mat leftImage_cur_, cv::Mat rightImage_pre_, cv::Mat rightImage_cur_, 
-                                    cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
+// bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre_, cv::Mat leftImage_cur_, cv::Mat rightImage_pre_, cv::Mat rightImage_cur_, 
+//                                     cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
 
-// bool VisualOdometry::StereoOdometry(cv::Mat leftImage_pre, cv::Mat leftImage_cur, cv::Mat rightImage_pre, cv::Mat rightImage_cur, 
-//                                             cv::Mat& rotation_vector, cv::Mat& translation_vector) {
+bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre, cv::Mat leftImage_cur, cv::Mat rightImage_pre, cv::Mat rightImage_cur, 
+                                            cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
 
-    if (leftImage_pre_.empty() || leftImage_cur_.empty() || rightImage_pre_.empty() || rightImage_cur_.empty()) {
+    // if (leftImage_pre_.empty(r << ) || leftImage_cur_.empty() || rightImage_pre_.empty() || rightImage_cur_.empty()) {
+    if (leftImage_pre.empty() || leftImage_cur.empty() || rightImage_pre.empty() || rightImage_cur.empty()) {
         std::cerr << "One or all images are Empty!" << std::endl;
-        // UnityLog("One or all images are Empty!");
+        UnityLog("One or all images are Empty!");
         // Initialize rotation and translation vectors to -1
         cv::Mat rotation_vector = cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
         cv::Mat translation_vector =cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
     }
 
     // Half the image size
-    int new_width = leftImage_pre_.cols / 2;
-    int new_height = leftImage_pre_.rows / 2;
-    cv::Size new_size(new_width, new_height);
+    // int new_width = leftImage_pre_.cols / 2;
+    // int new_height = leftImage_pre_.rows / 2;
+    // cv::Size new_size(new_width, new_height);
 
-    // Create a matrix to store the resized image
-    cv::Mat leftImage_pre, leftImage_cur, rightImage_pre, rightImage_cur;
-    // Resize the images using high-quality interpolation
-    cv::resize(leftImage_pre_, leftImage_pre, new_size, 0, 0, cv::INTER_AREA);
-    cv::resize(leftImage_cur_, leftImage_cur, new_size, 0, 0, cv::INTER_AREA);
-    cv::resize(rightImage_pre_, rightImage_pre, new_size, 0, 0, cv::INTER_AREA);
-    cv::resize(rightImage_cur_, rightImage_cur, new_size, 0, 0, cv::INTER_AREA);
+    // // Create a matrix to store the resized image
+    // cv::Mat leftImage_pre, leftImage_cur, rightImage_pre, rightImage_cur;
+    // // Resize the images using high-quality interpolation
+    // cv::resize(leftImage_pre_, leftImage_pre, new_size, 0, 0, cv::INTER_AREA);
+    // cv::resize(leftImage_cur_, leftImage_cur, new_size, 0, 0, cv::INTER_AREA);
+    // cv::resize(rightImage_pre_, rightImage_pre, new_size, 0, 0, cv::INTER_AREA);
+    // cv::resize(rightImage_cur_, rightImage_cur, new_size, 0, 0, cv::INTER_AREA);
 
 
     // Step 1: Rectify images
@@ -39,7 +40,7 @@ bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_p
     t2.join();
     
     //Compute depth map of previous Image pair
-    auto depth_map = computeDepth(leftImage_pre, rightImage_pre);
+    cv::Mat depth_map = computeDepth(leftImage_pre, rightImage_pre);
     
     // Vectors to hold the matched points
     std::vector<cv::Point2f> pts_prev_L, pts_cur_L;
@@ -52,7 +53,7 @@ bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_p
     // std::string message = "Number of matching points: " + std::to_string(num_matching);
     // UnityLog(message.c_str());
     // std::cout<<"Motion Estimation"<<std::endl;
-    bool state = motionEstimation(leftImage_color, pts_prev_L, pts_cur_L, depth_map, rotation_vector, translation_vector, leftImage_cur_, contour_pose);
+    bool state = motionEstimation(leftImage_color, pts_prev_L, pts_cur_L, depth_map, rotation_vector, translation_vector, leftImage_cur, contour_pose);
     
     return state;
 }
@@ -90,7 +91,7 @@ void VisualOdometry::RectifyImage(cv::Mat& leftImage, cv::Mat& rightImage) {
 }
 
 void VisualOdometry::reconstruct3D(const std::vector<cv::Point2f>& image_points, const cv::Mat& depth,
-                                   std::vector<cv::Point3f>& points_3D, std::vector<size_t>& outliers, float max_depth) {
+                                   std::vector<cv::Point3f>& points_3D, std::vector<size_t>& outliers) {
     points_3D.clear();
     outliers.clear();
 
@@ -100,7 +101,7 @@ void VisualOdometry::reconstruct3D(const std::vector<cv::Point2f>& image_points,
         float z = depth.at<float>(static_cast<int>(v), static_cast<int>(u));
 
         // Ignore points with invalid depth
-        if (z > max_depth) {
+        if (z <= 0) {
             outliers.push_back(i);
             continue;
         }
@@ -120,9 +121,10 @@ cv::Point3f VisualOdometry::computeMean3D(const std::vector<cv::Point3f>& points
     return mean;
 }
 
-bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
-                                        const cv::Mat& depth, cv::Mat& rvec, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
-                                        CountourPose* contour_pose, float max_depth) {
+bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, 
+                                        const std::vector<cv::Point2f>& image2_points, const cv::Mat& depth, cv::Mat& rvec, 
+                                        cv::Mat& translation_vector, cv::Mat leftImage_cur_, CountourPose* contour_pose) 
+{
     if (image1_points.size() != image2_points.size()) {
         std::cerr << "Error: Point sets must have the same size." << std::endl;
         return false;
@@ -131,7 +133,7 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
     // Step 1: Reconstruct 3D points
     std::vector<cv::Point3f> points_3D;
     std::vector<size_t> outliers;
-    reconstruct3D(image1_points, depth, points_3D, outliers, max_depth);
+    reconstruct3D(image1_points, depth, points_3D, outliers);
 
     std::vector<cv::Point2f> contourPoses2d;
     std::vector<cv::Point3f> contourPoses;
@@ -151,97 +153,100 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
     std::vector<cv::Point3f> filtered_points_3D;
     size_t num_points = image1_points.size();
     // filtered_image1_points.reserve(image1_points.size());
-    filtered_image2_points.reserve(image2_points.size());
-    filtered_points_3D.reserve(points_3D.size());
+    // filtered_image2_points.reserve(image2_points.size());
+    // filtered_points_3D.reserve(points_3D.size());
 
 
     for (size_t i = 0; i < num_points; ++i) {
         if (outlier_set.find(i) == outlier_set.end()) {
             // filtered_image1_points.push_back(image1_points[i]);
             filtered_image2_points.push_back(image2_points[i]);
-            filtered_points_3D.push_back(points_3D[i]);
+            // filtered_points_3D.push_back(points_3D[i]);
         }
     }
 
     
 
     // Step 3: Solve PnP with RANSAC
-    cv::Mat points_3D_mat(filtered_points_3D), filtered_image2_points_mat(filtered_image2_points);
-    cv::Mat(points_3D).convertTo(points_3D_mat, CV_32F);
-    cv::Mat(filtered_image2_points).convertTo(filtered_image2_points_mat, CV_32F);
+    std::cout << " Image points size: " << filtered_image2_points.size() << std::endl;
+    std::cout << " 3D points size: " << points_3D.size() << std::endl;
+    std::cout << " Image 1 points size: " << image1_points.size() << std::endl;
+
+    cv::Mat filtered_points_3D_mat(points_3D), filtered_image2_points_mat(filtered_image2_points);
+    filtered_points_3D_mat.convertTo(filtered_points_3D_mat, CV_32F);
+    filtered_image2_points_mat.convertTo(filtered_image2_points_mat, CV_32F);
 
     // std::vector<int> inliers;
     // std::string message = "Filtered image points size: " + std::to_string(filtered_image2_points_mat.size[0]);
     // UnityLog(message.c_str());
     // std::string message2 = "Filtered 3D points size: " + std::to_string(points_3D_mat.size[0]);
     // UnityLog(message2.c_str());
+    // std::cout << " length of outliers: " << outliers.size() << std::endl;
+    // std::cout << " length of unfiltered 2d points: " << image2_points.size() << std::endl;
     // std::cout << "Filtered image points size: " << filtered_image2_points_mat.size[0] << std::endl;
-    // std::cout << "Filtered 3D points size: " << points_3D_mat.size[0] << std::endl;
+    // std::cout << "Filtered 3D points size: " << filtered_points_3D_mat.size[0] << std::endl;
+    // std::cout << "3D points: " << points_3D.size() << std::endl;
     std::vector<int> inliers ;
-    bool success = cv::solvePnPRansac(points_3D_mat, filtered_image2_points_mat, K1_float, D1_float,
-                                    rvec, translation_vector, false, 100, 8.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
+    bool success = cv::solvePnPRansac(filtered_points_3D_mat, filtered_image2_points_mat, K1_float, 
+                                      D1_float, rvec, translation_vector);
+                                    // , false, 100, 8.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
    
-    
+    // std::cout << "Translation: " << rvec << std::endl;
+    if (success == false){ std::cout << "RansacPnP Failed \n";}
     return success;
     
 }
 
 cv::Mat VisualOdometry::computeDisparity(const cv::Mat& left, const cv::Mat& right) {
     // Create StereoSGBM object
-    auto stereo = cv::StereoSGBM::create(
-        0,            // Min disparity
-        4 * 16,       // Reduced number of disparities for faster computation
-        7,            // Smaller block size for faster computation
-        8 * 7 * 7,    // P1 with block size of 5
-        32 * 7 * 7,   // P2 with block size of 5
-        31,           // Pre-filter cap
-        10,           // Uniqueness ratio
-        0,            // Speckle window size
-        0,            // Speckle range
-        cv::StereoSGBM::MODE_SGBM // Mode
-    );
+    // auto stereo = cv::StereoSGBM::create(
+    //     0,            // Min disparity
+    //     4 * 16,       // Reduced number of disparities for faster computation
+    //     9,            // Smaller block size for faster computation
+    //     8 * 3 * 9 * 9,    // P1 with block size of 5
+    //     32 * 3 * 9 * 9,   // P2 with block size of 5
+    //     31,           // Pre-filter cap
+    //     15,           // Uniqueness ratio
+    //     50,            // Speckle window size
+    //     2,            // Speckle range
+    //     cv::StereoSGBM::MODE_SGBM // Mode
+    // );
 
-    // Compute disparity
-    cv::Mat disparity(left.size(), CV_16S);
+    // // Compute disparity
+    // // cv::Mat disparity(left.size(), CV_16S);
+    // cv::Mat disparity;
+    // stereo->compute(left, right, disparity);
+
+    // // Convert to float for bilateral filtering
+    // cv::Mat disparity_float;
+    // disparity.convertTo(disparity_float, CV_32F);  // scale back to original disparity, SGBM divides disparity by 16
+
+    // std::cout << "Disparity computed with size: " << disparity_float.size() << std::endl;
+
+    // Create StereoSGBM object
+    cv::Ptr<cv::StereoSGBM> stereo = cv::StereoSGBM::create(0, 4*16, 5);
+    stereo->setP1(8 * left.channels() * 5 * 5);
+    stereo->setP2(32 * left.channels() * 5 * 5);
+    stereo->setPreFilterCap(63);
+    stereo->setMode(cv::StereoSGBM::MODE_SGBM);
+
+    // Compute disparity map
+    cv::Mat disparity;
     stereo->compute(left, right, disparity);
 
-    // Convert to float for bilateral filtering
+    // Convert disparity to float
     cv::Mat disparity_float;
-    disparity.convertTo(disparity_float, CV_32F, 1.0 / 16.0);  // scale back to original disparity
+    disparity.convertTo(disparity_float, CV_32F, 1.0 / 16.0);
 
-
-    // Normalize disparity for visualization (optional)
-    // cv::Mat disparity_normalized;
-    // cv::normalize(disparity, disparity_normalized, 0, 255, cv::NORM_MINMAX, CV_8U);
-
-    cv::Mat disparity_filtered_float;
-    cv::bilateralFilter(disparity_float, disparity_filtered_float, 9, 75, 75);
-
-    // if (!prev_disparity.empty()) {
-    //     for (int y = 0; y < disparity_filtered_float.rows; ++y) {
-    //         for (int x = 0; x < disparity_filtered_float.cols; ++x) {
-    //             float curr = static_cast<float>(disparity_filtered_float.at<short>(y, x)) / 16.0;
-    //             float prev = static_cast<float>(prev_disparity.at<short>(y, x)) / 16.0;
-    //             if (std::abs(curr - prev) > threshold) {
-    //                 disparity_filtered_float.at<short>(y, x) = prev_disparity.at<short>(y, x); // Or use neighborhood average
-    //             }
-    //         }
-    //     }
-    // }
-    // prev_disparity = disparity_filtered_float.clone();
-
-
-    cv::Mat disparity_filtered;
-    disparity_filtered_float.convertTo(disparity_filtered, CV_16S, 16.0);  // back to fixed-point disparity
-
-    return disparity_filtered;
+    return disparity_float;
 }
 // Compute depth from disparity
-cv::Mat VisualOdometry::computeDepth(const cv::Mat& left, const cv::Mat& right) {
-    auto disparity = computeDisparity(left, right);  // Assuming this is a pre-defined function
+cv::Mat VisualOdometry::computeDepth(const cv::Mat& left, const cv::Mat& right, const float max_depth) {
+    cv::Mat disparity = computeDisparity(left, right);  // Assuming this is a pre-defined function
 
     double focal_length_ = K1.at<double>(0, 0);
-    double baseline_ = T.at<double>(0);
+    double baseline_ = T2.at<double>(0) - T.at<double>(0);
+    // double baseline_ = 0.5; // KITTI baseline value, adjust as needed
 
     cv::Mat depth(disparity.size(), CV_32F);
 
@@ -249,9 +254,13 @@ cv::Mat VisualOdometry::computeDepth(const cv::Mat& left, const cv::Mat& right) 
     cv::parallel_for_(cv::Range(0, disparity.rows), [&](const cv::Range& r) {
         for (int y = r.start; y < r.end; ++y) {
             for (int x = 0; x < disparity.cols; ++x) {
-                float d = static_cast<float>(disparity.at<short>(y, x)) / 16.0;  // SGBM divides disparity by 16
+                float d = disparity.at<float>(y, x) ;
                 if (d > 0) { // Avoid division by zero
-                    depth.at<float>(y, x) = (focal_length_ * baseline_) / d;
+                    float depth_ = (focal_length_ * baseline_) / d; // Depth calculation
+                    if (depth_ > max_depth) {
+                        depth_ = 0.0f; // Set to 0 if depth exceeds max_depth
+                    }
+                    depth.at<float>(y, x) = depth_; // Store the computed depth
                 } else {
                     depth.at<float>(y, x) = 0.0f; // Invalid depth
                 }
@@ -259,6 +268,10 @@ cv::Mat VisualOdometry::computeDepth(const cv::Mat& left, const cv::Mat& right) 
         }
     });
 
+    std::cout << "Depth map computed with size: " << depth.size() << std::endl;
+    double minVal, maxVal;
+    cv::minMaxLoc(depth, &minVal, &maxVal);
+    std::cout << "Min value: " << minVal << ", Max value: " << maxVal << std::endl;
     return depth;
 }
 
@@ -267,7 +280,7 @@ cv::Mat VisualOdometry::computeDepth(const cv::Mat& left, const cv::Mat& right) 
 void VisualOdometry::feature_matching(const cv::Mat& left_prev, const cv::Mat& left_cur,
     std::vector<cv::Point2f>& pts_prev_L, std::vector<cv::Point2f>& pts_cur_L) {
     
-    int MAX_FEATURES = 3000, grid_rows = 3, grid_cols = 8, min_distance = 0;
+    int MAX_FEATURES = 1000, grid_rows = 3, grid_cols = 8, min_distance = 0;
     
     cv::Ptr<cv::ORB> orb1 = cv::ORB::create(MAX_FEATURES);
     cv::Ptr<cv::ORB> orb2 = cv::ORB::create(MAX_FEATURES);
@@ -281,10 +294,11 @@ void VisualOdometry::feature_matching(const cv::Mat& left_prev, const cv::Mat& l
     orb1->detectAndCompute(left_prev, cv::noArray(), keypoints1, descriptors1);
     orb2->detectAndCompute(left_cur, cv::noArray(), keypoints2, descriptors2);
 
-    filterKeypointsByDistance(keypoints1, descriptors1, filtered_keypoints1, filtered_descriptors1, min_distance);
-    filterKeypointsByDistance(keypoints2, descriptors2, filtered_keypoints2, filtered_descriptors2, min_distance);
+    // filterKeypointsByDistance(keypoints1, descriptors1, filtered_keypoints1, filtered_descriptors1, min_distance);
+    // filterKeypointsByDistance(keypoints2, descriptors2, filtered_keypoints2, filtered_descriptors2, min_distance);
 
-
+    filtered_keypoints1 = keypoints1, filtered_keypoints2 = keypoints2;
+    filtered_descriptors1 = descriptors1, filtered_descriptors2 = descriptors2;
     cv::BFMatcher matcher(cv::NORM_L2);
     std::vector<std::vector<cv::DMatch>> knn_matches;
     matcher.knnMatch(filtered_descriptors1, filtered_descriptors2, knn_matches, 2);
@@ -300,7 +314,7 @@ void VisualOdometry::feature_matching(const cv::Mat& left_prev, const cv::Mat& l
             good_matches.push_back(knn_matches[i][0]);
         }
     }
-
+    
     // std::cout << "Good matches found: " << good_matches.size() << std::endl;
     // std::string message3 = "Good matches found: " + std::to_string(good_matches.size());
     // UnityLog(message3.c_str());
@@ -313,6 +327,7 @@ void VisualOdometry::feature_matching(const cv::Mat& left_prev, const cv::Mat& l
         pts_cur_L.push_back(filtered_keypoints2[match.trainIdx].pt);
     }
     
+    std::cout << "filtered_keypoints found: " << pts_prev_L.size() << "\n";
 
     // UnityLog("Number of matched points: ");
     // UnityLog(std::to_string(pts_prev_L.size()).c_str());
@@ -354,9 +369,9 @@ void VisualOdometry::updatePose(cv::Mat& tot_translation_vector, cv::Mat& tot_ro
 
 void VisualOdometry::matchWithSIFT(const cv::Mat& img1, const cv::Mat& img2,
                    std::vector<cv::Point2f>& pts1, std::vector<cv::Point2f>& pts2) {
-    int MAX_FEATURES = 3000, grid_rows = 3, grid_cols = 8, min_distance = 3;
+    int MAX_FEATURES = 1500, grid_rows = 3, grid_cols = 8, min_distance = 3;
 
-    int max_per_cell = (int)std::ceil((float)MAX_FEATURES / (grid_rows * grid_cols));
+    
     // int max_per_cell = 20;
     // 1. Create SIFT detector
     cv::Ptr<cv::SIFT> sift = cv::SIFT::create(MAX_FEATURES);
@@ -367,11 +382,16 @@ void VisualOdometry::matchWithSIFT(const cv::Mat& img1, const cv::Mat& img2,
     sift->detectAndCompute(img1, cv::noArray(), keypoints1, descriptors1);
     sift->detectAndCompute(img2, cv::noArray(), keypoints2, descriptors2);
 
+    int max_per_cell = (int)std::ceil((float)keypoints1.size() / (grid_rows * grid_cols));
+
     // filterKeypointsByGrid(img1, keypoints1, descriptors1, filtered_keypoints1, filtered_descriptors1, grid_rows, grid_cols, max_per_cell);
     // filterKeypointsByGrid(img2, keypoints2, descriptors2, filtered_keypoints2, filtered_descriptors2, grid_rows, grid_cols, max_per_cell);
     filterKeypointsByDistance(keypoints1, descriptors1, filtered_keypoints1, filtered_descriptors1, min_distance);
     filterKeypointsByDistance(keypoints2, descriptors2, filtered_keypoints2, filtered_descriptors2, min_distance);
-
+    // filtered_descriptors1 = descriptors1;
+    // filtered_descriptors2 = descriptors2;
+    // filtered_keypoints1 = keypoints1;
+    // filtered_keypoints2 = keypoints2;
     // 3. Match descriptors using BFMatcher (L2 norm for SIFT)
     cv::BFMatcher matcher(cv::NORM_L2);
     std::vector<std::vector<cv::DMatch>> knn_matches;
@@ -379,6 +399,7 @@ void VisualOdometry::matchWithSIFT(const cv::Mat& img1, const cv::Mat& img2,
 
     // std::string message2 = "KNN matches found: " + std::to_string(knn_matches.size());
     // UnityLog(message2.c_str());
+    
 
     // 4. Lowe's ratio test
     const float ratio_thresh = 0.95f;
@@ -400,6 +421,8 @@ void VisualOdometry::matchWithSIFT(const cv::Mat& img1, const cv::Mat& img2,
         pts1.push_back(filtered_keypoints1[match.queryIdx].pt);
         pts2.push_back(filtered_keypoints2[match.trainIdx].pt);
     }
+
+    std::cout << "filtered_keypoints found: " << pts1.size() << "\n";
 
     // // Optional: draw matches
     // cv::Mat img_matches;

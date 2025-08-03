@@ -93,12 +93,12 @@ class VisualOdometry {
         // Motion estimation from two sets of 2D points and depth map.
         bool motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
                             const cv::Mat& depth, cv::Mat& rotation_vector, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
-                            CountourPose* contour_pose, float max_depth = 500.0f);
+                            CountourPose* contour_pose);
 
 
         cv::Mat K1 = (cv::Mat_<double>(3, 3) << 9.597910e+02, 0, 6.960217e+02,
                                                 0, 9.569251e+02, 2.241806e+02,
-                                                0, 0, 1)/2;
+                                                0, 0, 1);
 
         cv::Mat D1 = (cv::Mat_<double>(1, 5) << -3.691481e-01, 1.968681e-01, 1.353473e-03, 5.677587e-04, -6.770705e-02);
 
@@ -113,7 +113,7 @@ class VisualOdometry {
 
         cv::Mat K2 = (cv::Mat_<double>(3, 3) << 9.037596e+02, 0, 6.957519e+02,
                                                 0, 9.019653e+02, 2.242509e+02,
-                                                0, 0, 1)/2;
+                                                0, 0, 1);
 
         cv::Mat D2 = (cv::Mat_<double>(1, 5) << -3.639558e-01, 1.788651e-01, 6.029694e-04, -3.922424e-04, -5.382460e-02);
         
@@ -144,7 +144,7 @@ class VisualOdometry {
         void RectifyImage(cv::Mat& leftImage, cv::Mat& rightImage);
 
         void reconstruct3D(const std::vector<cv::Point2f>& image_points, const cv::Mat& depth,
-                           std::vector<cv::Point3f>& points_3D, std::vector<size_t>& outliers, float max_depth);
+                           std::vector<cv::Point3f>& points_3D, std::vector<size_t>& outliers);
 
         //Compute mean of 3D points.
         cv::Point3f computeMean3D(const std::vector<cv::Point3f>& points);
@@ -153,7 +153,7 @@ class VisualOdometry {
         cv::Mat computeDisparity(const cv::Mat& left, const cv::Mat& right);
 
         // Compute depth map
-        cv::Mat computeDepth(const cv::Mat& left, const cv::Mat& right); 
+        cv::Mat computeDepth(const cv::Mat& left, const cv::Mat& right, const float max_depth = 500.0f); 
 
         void feature_matching(const cv::Mat& left_prev, const cv::Mat& left_cur, 
                             std::vector<cv::Point2f>& pts_prev_L, std::vector<cv::Point2f>& pts_cur_L);

@@ -142,8 +142,13 @@ int main( int c, char** argv) {
                     cv::Rodrigues(r, rp.R);
                     rel_poses[int(i/skip)] = rp;
                     rel_poses[int(i/skip)].valid = true;
+                    std::cout << "Calculated relative pose: " << rp.t << std::endl;
                     // std::cout << "Processing frame pair: " << i << " and " << i + step << std::endl;
-                    std::cout << "rel pose for frame "<< i << " to frame "<<  i + skip <<": " << rp.t.t() <<std::endl;
+                    // std::cout << "rel pose for frame "<< i << " to frame "<<  i + skip <<": " << rp.t.t() <<std::endl;
+                }
+                else{
+                    std::cerr << "StereoOdometry failed for images: " << i << " and " << i + skip << std::endl;
+                    rel_poses[int(i/skip)].valid = false;
                 }
                 std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
                 RelativePose marker_pose;
@@ -160,21 +165,23 @@ int main( int c, char** argv) {
         std::vector<std::thread> threads;
         // std::cout << "Total loop: " <<old_frames + total_frames<<std::endl;
         // std::cout << " Old frames: " << old_frames <<std::endl;
-        for (int i = std::max(0, old_frames); i < old_frames + total_frames - skip; i+= skip) {
-            threads.emplace_back(compute_rel_pose, i, skip);
-            // std::cout << "Processing frame pair: " << i << " and " << i + skip << std::endl;
+        // for (int i = std::max(0, old_frames); i < old_frames + total_frames - skip; i+= skip) {
+        for (int i = 0; i < total_frames; i += skip) {
+            compute_rel_pose(i, skip);
+        //     threads.emplace_back(compute_rel_pose, i, skip);
+        //     // std::cout << "Processing frame pair: " << i << " and " << i + skip << std::endl;
 
-            // Limit concurrent threads
-            if (threads.size() >= num_threads) {
-                for (auto& t : threads) t.join();
-                threads.clear();
-            }
-            last_img_set = i + skip;
+        //     // Limit concurrent threads
+        //     if (threads.size() >= num_threads) {
+        //         for (auto& t : threads) t.join();
+        //         threads.clear();
+        //     }
+        //     last_img_set = i + skip;
         }
-        if ( left_image_paths.size() - last_img_set <= skip) threads.emplace_back(compute_rel_pose, last_img_set, skip);
+        // if ( left_image_paths.size() - last_img_set <= skip) threads.emplace_back(compute_rel_pose, last_img_set, skip);
 
-        // Join remaining threads
-        for (auto& t : threads) t.join();
+        // // Join remaining threads
+        // for (auto& t : threads) t.join();
         // std::cout << "Joined threads \n";
         // R_global = cv::Mat::eye(3, 3, CV_64F);
         // t_global = cv::Mat::zeros(3, 1, CV_64F);

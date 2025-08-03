@@ -30,24 +30,37 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find dependencies
 find_package(OpenCV 4 REQUIRED)
 
-if(NOT OpenCV_FOUND)
-    message(FATAL_ERROR "OpenCV not found. Please install OpenCV.")
-endif()
-# Include directories
-include_directories(${OpenCV_INCLUDE_DIRS} include /usr/local/include)
+find_package(PCL REQUIRED)
 
-# Build a shared library
+if(NOT OpenCV_FOUND OR NOT PCL_FOUND)
+    message(FATAL_ERROR "OpenCV or PCL not found. Please install OpenCV.")
+endif()
+
+
+# Build a shared library (No main function in shared lib)
 add_library(VisualOdometry SHARED
     src/vo_process.cpp
-    src/visualodom_tcp.cpp
+    src/visualodom.cpp
     # visual odometry implementation
 )
+
+# Include directories
+# include_directories(${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} include /usr/local/include)
+include_directories( VisualOdometry PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /usr/local/include
+)
+# Specify the include directories for the library
+# add_definitions(${PCL_DEFINITIONS})
 
 # Link libraries
 target_link_libraries(VisualOdometry
     pthread
     ${OpenCV_LIBS}
     nlohmann_json::nlohmann_json # Link against the nlohmann_json library
+    ${PCL_LIBRARIES} # Link against PCL libraries
 )
 
 # Set output directory for the shared library (optional but recommended)
@@ -72,6 +85,18 @@ add_executable(VisualOdometry_exe
 add_executable(VisualOdometry_tcp
                 src/visualodom_tcp.cpp # TCP communication implementation
                 )
+
+add_executable(icp_pcd
+                src/pcd_pose.cpp # ICP PCD processing implementation
+                )
+
+# Add pcl executable for testing purposes
+target_link_libraries(icp_pcd
+                        ${PCL_LIBRARIES}
+                        ${OpenCV_LIBS}
+                        pthread
+                        VisualOdometry # Link against the shared library
+                    )
 
 target_link_libraries(VisualOdometry_exe
                         nlohmann_json::nlohmann_json

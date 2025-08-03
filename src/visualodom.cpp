@@ -17,6 +17,8 @@ EXPORT void UnityLog(const char* message) {
     }
 }
 
+/*
+
 EXPORT bool add(float* a) {
     if (a == nullptr) {
         UnityLog("Error: Null pointer passed to add function.");
@@ -255,3 +257,5 @@ EXPORT bool ProcessFrame(VisualOdometryHandle handle, unsigned char* preMatDataL
         return false;
     }
 }
+
+*/

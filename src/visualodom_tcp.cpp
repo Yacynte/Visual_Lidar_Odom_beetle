@@ -3,6 +3,7 @@
 #include <vector>
 #include <filesystem> //  C++17 and above
 #include "vo_process.h"
+#include "visualodom.h"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -135,7 +136,9 @@ int main( int c, char** argv) {
             try{
                 if (vo.StereoOdometry(left_pre_color, left_pre, left_cur, right_pre, right_cur, rel_R, rel_t, contour_pose)) {
                     cv::Rodrigues(rel_R, rp);
-                    // std::cout << "Calculated relative pose: " << rel_t << std::endl;
+                    std::cout << "Calculated relative pose: " << rel_t << std::endl;
+                    // std::string message2 = "Calculated relative pose: {}" + std::to_string(rel_t);
+                    // UnityLog(message2.c_str());  
                     rel_pose->valid = true;
                     if(contour_pose->valid) {
                         contour_pose->position = rel_index; // Store the position index
