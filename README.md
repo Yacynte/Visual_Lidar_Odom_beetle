@@ -14,6 +14,16 @@ Ensure you have the following installed on your **PC**:
 - **GCC/G++** (for native builds)
 - **OpenCV & PCL** (for both target platforms)
 
+## 3. build ceres
+git clone https://ceres-solver.googlesource.com/ceres-solver
+cd ceres-solver
+git checkout 2.1.0
+mkdir build && cd build
+
+cmake .. -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=ON
+make -j$(nproc)
+sudo make install
+
 ## 3. Building for PC (x86_64)
 
 ### **Step 1: Install Dependencies**

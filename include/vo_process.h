@@ -16,6 +16,9 @@
 #include <string>
 #include <filesystem> // For directory and file handling
 
+#include <ceres/ceres.h>
+#include <ceres/rotation.h>
+
 #include <opencv2/core.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/aruco.hpp>
@@ -62,6 +65,8 @@ class VisualOdometry {
 
             K1.convertTo(K1_float, CV_32F);
             D1.convertTo(D1_float, CV_32F);
+            K2.convertTo(K2_float, CV_32F);
+            D2.convertTo(D2_float, CV_32F);
         }
         
         // Method to compute stereo odometry
@@ -91,7 +96,8 @@ class VisualOdometry {
             const std::map<int, MarkerInfo>& leftMarkers, const std::map<int, MarkerInfo>& rightMarkers);
                 
         // Motion estimation from two sets of 2D points and depth map.
-        bool motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points, const std::vector<cv::Point2f>& image2_points,
+        bool motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points_L, const std::vector<cv::Point2f>& image2_points_L,
+                            const std::vector<cv::Point2f>& image1_points_R, const std::vector<cv::Point2f>& image2_points_R,
                             const cv::Mat& depth, cv::Mat& rotation_vector, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
                             CountourPose* contour_pose);
 
@@ -131,7 +137,8 @@ class VisualOdometry {
         cv::Ptr<cv::ORB> orb = cv::ORB::create();
 
         float fx, fy, cx, cy, threshold = 1.0f;
-        cv::Mat K1_float, D1_float;
+        cv::Mat K1_float, D1_float, K2_float, D2_float;
+
         cv::Mat prev_disparity; // Store this from previous frame
         
         // cv::Mat disparity;
@@ -184,6 +191,49 @@ class VisualOdometry {
             {-half_dist, -half_dist, 0.0f}   // bottom-left
         };
 
-};  
+        struct ReprojectionError {
+            ReprojectionError(const cv::Point3f& point3D,
+                            const cv::Point2f& point2D,
+                            const cv::Mat& K)
+            : point3D(point3D), point2D(point2D) {
+                fx = K.at<float>(0,0); fy = K.at<float>(1,1);
+                cx = K.at<float>(0,2); cy = K.at<float>(1,2);
+            }
 
+            template<typename T>
+            bool operator()(const T* const camera, T* residuals) const {
+                // camera: angle-axis (3), translation (3)
+                T P[3];
+                P[0] = T(point3D.x);
+                P[1] = T(point3D.y);
+                P[2] = T(point3D.z);
+
+                T p[3];
+                ceres::AngleAxisRotatePoint(camera, P, p); // rotate
+                p[0] += camera[3]; p[1] += camera[4]; p[2] += camera[5]; // translate
+
+                T xp = p[0] / p[2];
+                T yp = p[1] / p[2];
+
+                T u = T(fx) * xp + T(cx);
+                T v = T(fy) * yp + T(cy);
+
+                residuals[0] = u - T(point2D.x);
+                residuals[1] = v - T(point2D.y);
+                return true;
+            }
+
+            static ceres::CostFunction* Create(const cv::Point3d& P,
+                                            const cv::Point2d& p,
+                                            const cv::Mat& K) {
+                return new ceres::AutoDiffCostFunction<ReprojectionError,2,6>(
+                    new ReprojectionError(P,p,K));
+            }
+
+            cv::Point3d point3D;
+            cv::Point2d point2D;
+            double fx,fy,cx,cy;
+        };
+
+};  
 

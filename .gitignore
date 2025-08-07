@@ -4,3 +4,4 @@ Data
 build
 include/opencv
 include/opencv_contrib
+ceres-solver

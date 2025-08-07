@@ -32,6 +32,8 @@ find_package(OpenCV 4 REQUIRED)
 
 find_package(PCL REQUIRED)
 
+find_package(Ceres REQUIRED)
+
 if(NOT OpenCV_FOUND OR NOT PCL_FOUND)
     message(FATAL_ERROR "OpenCV or PCL not found. Please install OpenCV.")
 endif()
@@ -46,7 +48,7 @@ add_library(VisualOdometry SHARED
 
 # Include directories
 # include_directories(${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} include /usr/local/include)
-include_directories( VisualOdometry PRIVATE
+target_include_directories( VisualOdometry PUBLIC
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -61,6 +63,7 @@ target_link_libraries(VisualOdometry
     ${OpenCV_LIBS}
     nlohmann_json::nlohmann_json # Link against the nlohmann_json library
     ${PCL_LIBRARIES} # Link against PCL libraries
+    Ceres::ceres # Link against Ceres Solver
 )
 
 # Set output directory for the shared library (optional but recommended)
@@ -95,7 +98,7 @@ target_link_libraries(icp_pcd
                         ${PCL_LIBRARIES}
                         ${OpenCV_LIBS}
                         pthread
-                        VisualOdometry # Link against the shared library
+                        # VisualOdometry # Link against the shared library
                     )
 
 target_link_libraries(VisualOdometry_exe
@@ -103,6 +106,7 @@ target_link_libraries(VisualOdometry_exe
                         pthread
                         ${OpenCV_LIBS}
                         VisualOdometry # Link against the shared library
+                        Ceres::ceres # Link against Ceres Solver
                         )
 
 target_link_libraries(VisualOdometry_tcp
@@ -110,6 +114,7 @@ target_link_libraries(VisualOdometry_tcp
                         pthread
                         ${OpenCV_LIBS}
                         VisualOdometry # Link against the shared library
+                        Ceres::ceres # Link against Ceres Solver
                         )
 
 # Link it to your library/executables
