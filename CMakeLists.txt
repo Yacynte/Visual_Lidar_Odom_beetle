@@ -43,6 +43,7 @@ endif()
 add_library(VisualOdometry SHARED
     src/vo_process.cpp
     src/visualodom.cpp
+    src/vo_ceres.cpp # Include the Ceres optimization implementation
     # visual odometry implementation
 )
 
@@ -82,11 +83,13 @@ set_target_properties(VisualOdometry PROPERTIES
 add_executable(VisualOdometry_exe
                 src/main.cpp # Assuming you have a separate main.cpp for testing
                 src/vo_process.cpp
+                src/vo_ceres.cpp # Include the Ceres optimization implementation
                 )
 
 # Build a separate executable for TCP communication
 add_executable(VisualOdometry_tcp
                 src/visualodom_tcp.cpp # TCP communication implementation
+                src/vo_ceres.cpp # Include the Ceres optimization implementation
                 )
 
 add_executable(icp_pcd

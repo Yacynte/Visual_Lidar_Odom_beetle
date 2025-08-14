@@ -1,6 +1,7 @@
 // StereoCamera.h
 #pragma once
 
+#include <vo_ceres.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -15,9 +16,6 @@
 #include <vector>
 #include <string>
 #include <filesystem> // For directory and file handling
-
-#include <ceres/ceres.h>
-#include <ceres/rotation.h>
 
 #include <opencv2/core.hpp>
 #include <opencv2/opencv.hpp>
@@ -44,15 +42,22 @@ struct MarkerInfo {
         };
 
 struct RelativePose {
-        cv::Mat R, t;
+        // cv::Mat R, t;
+        Eigen::Vector3f R = Eigen::Vector3f::Zero();
+        Eigen::Vector3f t = Eigen::Vector3f::Zero();
         bool valid = false;
+        std::string sensor_type; // "camera" or "lidar"
+        float timestamp; // Timestamp of the pose
     };
 
 struct CountourPose {
-        cv::Mat R, t;
+        // cv::Mat R, t;
+        Eigen::Matrix3f R = Eigen::Vector3f::Zero();
+        Eigen::Vector3f t;
         int position;
         bool valid = false;
     };
+
 
 class VisualOdometry {
     public:
@@ -71,7 +76,8 @@ class VisualOdometry {
         
         // Method to compute stereo odometry
         bool StereoOdometry(cv::Mat leftImage_color, cv::Mat preLeftImage, cv::Mat curLeftImage, cv::Mat preRightImage, cv::Mat curRightImage, 
-                            cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose); //, cv::Mat init_R, cv::Mat init_T);
+                            RelativePose* rel_pose, CountourPose* contour_pose);
+                            // cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose); //, cv::Mat init_R, cv::Mat init_T);
 
         void updatePose(cv::Mat& tot_translation_vector, cv::Mat& tot_rotation_vector,  cv::Mat& rel_translation_vector, cv::Mat& rel_rotation_vector);
 
@@ -87,7 +93,7 @@ class VisualOdometry {
         void estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight,
                                 std::map<int, MarkerInfo>& detectedLeftMarkers,
                                 std::map<int, MarkerInfo>& detectedRightMarkers,
-                                cv::Mat& rvec, cv::Mat& tvec);
+                                CountourPose* contour_pose);
 
     private:
 
@@ -97,8 +103,8 @@ class VisualOdometry {
                 
         // Motion estimation from two sets of 2D points and depth map.
         bool motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points_L, const std::vector<cv::Point2f>& image2_points_L,
-                            const std::vector<cv::Point2f>& image1_points_R, const std::vector<cv::Point2f>& image2_points_R,
-                            const cv::Mat& depth, cv::Mat& rotation_vector, cv::Mat& translation_vector, cv::Mat leftImage_cur_,
+                            // const std::vector<cv::Point2f>& image1_points_R, const std::vector<cv::Point2f>& image2_points_R,
+                            const cv::Mat& depth, RelativePose* rel_pose, cv::Mat leftImage_cur_,
                             CountourPose* contour_pose);
 
 
@@ -191,49 +197,15 @@ class VisualOdometry {
             {-half_dist, -half_dist, 0.0f}   // bottom-left
         };
 
-        struct ReprojectionError {
-            ReprojectionError(const cv::Point3f& point3D,
-                            const cv::Point2f& point2D,
-                            const cv::Mat& K)
-            : point3D(point3D), point2D(point2D) {
-                fx = K.at<float>(0,0); fy = K.at<float>(1,1);
-                cx = K.at<float>(0,2); cy = K.at<float>(1,2);
-            }
+        void optimizePoseWithCeres( std::vector<int> inliers_L, std::vector<int> inliers_R, 
+                                            const cv::Mat& points3D_L, const cv::Mat& points2D_L,
+                                            const cv::Mat& points3D_R, const cv::Mat& points2D_R,
+                                            cv::Mat& rvec_degree, cv::Mat& tvec);
 
-            template<typename T>
-            bool operator()(const T* const camera, T* residuals) const {
-                // camera: angle-axis (3), translation (3)
-                T P[3];
-                P[0] = T(point3D.x);
-                P[1] = T(point3D.y);
-                P[2] = T(point3D.z);
-
-                T p[3];
-                ceres::AngleAxisRotatePoint(camera, P, p); // rotate
-                p[0] += camera[3]; p[1] += camera[4]; p[2] += camera[5]; // translate
-
-                T xp = p[0] / p[2];
-                T yp = p[1] / p[2];
-
-                T u = T(fx) * xp + T(cx);
-                T v = T(fy) * yp + T(cy);
-
-                residuals[0] = u - T(point2D.x);
-                residuals[1] = v - T(point2D.y);
-                return true;
-            }
-
-            static ceres::CostFunction* Create(const cv::Point3d& P,
-                                            const cv::Point2d& p,
-                                            const cv::Mat& K) {
-                return new ceres::AutoDiffCostFunction<ReprojectionError,2,6>(
-                    new ReprojectionError(P,p,K));
-            }
-
-            cv::Point3d point3D;
-            cv::Point2d point2D;
-            double fx,fy,cx,cy;
-        };
+protected:
+        // -------------------- Utilities --------------------
+    static std::mutex cout_mtx;
+    void safe_log(const std::string &s);
 
 };  
 

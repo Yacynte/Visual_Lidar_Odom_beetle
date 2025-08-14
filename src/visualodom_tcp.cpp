@@ -4,6 +4,8 @@
 #include <filesystem> //  C++17 and above
 #include "vo_process.h"
 #include "visualodom.h"
+#include "receive_cloud.h"
+#include "PoseFusionEKF.hpp"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -81,9 +83,12 @@ int main( int c, char** argv) {
 
     std::string left_folder = "/home/divan/beetle/VisualOdometry/Data/LeftImages/sync_Left_" ;// "Data/LeftImages/sync_Left_";
     std::string right_folder = "/home/divan/beetle/VisualOdometry/Data/RightImages/sync_Right_"; // "Data/RightImages/sync_Right_";
+    std::string lidar_path = "/home/divan/beetle/VisualOdometry/Data/lidar/lidar_"; // "Data/lidar/lidar_" ;
 
     // Create an instance of your VisualOdometry class
     VisualOdometry vo;
+    LidarOdometry lo; 
+
 
 
     if (left_folder.empty() || right_folder.empty()) {
@@ -103,8 +108,70 @@ int main( int c, char** argv) {
         // cv::Mat tot_rotation_vector = cv::Mat::zeros(3, 1, CV_32F);
         // cv::Mat tot_translation_vector = cv::Mat::zeros(3, 1, CV_32F);
 
+
         // Compute odometry asychronously
-        auto compute_rel_pose = [&](std::string pre_image, std::string current_image, RelativePose* rel_pose, 
+        auto lidar_rel_pose = [&](std::string pre_timestamp, std::string cur_timestamp, RelativePose* rel_pose) {
+            pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
+
+            try {
+                // Load point clouds from binary files
+                std::string source_path = lidar_path + pre_timestamp + ".bin";
+                std::string target_path = lidar_path + cur_timestamp + ".bin";
+                std::ifstream source_input(source_path, std::ios::binary);
+                std::ifstream target_input(target_path, std::ios::binary);
+                if (!source_input || !target_input) {
+                    std::cerr << "Failed to open source or target file." << std::endl;
+                    return false;
+                }
+                // Each point is 2 floats (x, y)
+                while (!source_input.eof()) {
+                    pcl::PointXYZ source_point;
+                    pcl::PointXYZ target_point;
+                    source_input.read(reinterpret_cast<char*>(&source_point.x), sizeof(float));
+                    source_input.read(reinterpret_cast<char*>(&source_point.y), sizeof(float));
+                    // source_input.read(reinterpret_cast<char*>(&source_point.z), sizeof(float));
+
+                    target_input.read(reinterpret_cast<char*>(&target_point.x), sizeof(float));
+                    target_input.read(reinterpret_cast<char*>(&target_point.y), sizeof(float));
+                    // target_input.read(reinterpret_cast<char*>(&target_point.z), sizeof(float));
+
+                    // Set z to 0
+                    source_point.z = 0.0f;
+                    target_point.z = 0.0f;
+
+                    source.push_back(source_point);
+                    target.push_back(target_point);
+                }
+
+                
+
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error loading point cloud: " << e.what() << std::endl;
+                return;
+            }
+
+            try {
+                if(lo.lidarOdom(source, target, rel_pose)) {
+                    std::cout << "Lidar odometry computed successfully." << std::endl;
+                    rel_pose->timestamp = std::stof(cur_timestamp); // Convert timestamp to float
+                    // Update global pose
+                    // R_global = rel_pose->R * R_global;
+                    // t_global += rel_pose->t;
+                } else {
+                    std::cerr << "Lidar odometry failed for timestamps: " << pre_timestamp << " and " << cur_timestamp << std::endl;
+                }
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error in lidar odometry: " << e.what() << std::endl;
+            }
+        
+        };
+
+
+        // Compute odometry asychronously
+        auto camera_rel_pose = [&](std::string pre_image, std::string current_image, RelativePose* rel_pose, 
                                 CountourPose* contour_pose, int rel_index) {
             cv::Mat right_cur, left_cur, right_pre, left_pre, left_pre_color;
 
@@ -151,12 +218,14 @@ int main( int c, char** argv) {
                 }
                 rel_pose->R = rp;
                 rel_pose->t = rel_t;
+                rel_pose->sensor_type = "camera"; // Set sensor type
+                rel_pose->timestamp = std::stof(current_image); // Convert timestamp to float
 
                 std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
                 if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers) && !contour_pose->valid) {
                     // std::cout << "Detected markers in frame pair: " << i << " and " << i + step << std::endl;
                     // Estimate pose of the markers
-                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose->R, contour_pose->t);
+                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose);
                     contour_pose->position = rel_index; // Store the position index
                     contour_pose->valid = true;
                     
@@ -196,7 +265,9 @@ int main( int c, char** argv) {
 
         int rel_index = 0;
         bool first_index = true;
+        bool first_index_lidar = true;
         std::string pre_timestamp;
+        std::string pre_timestamp_lidar;
         std::vector<RelativePose> rel_poses;
         std::vector<CountourPose> contour_poses;
         rel_poses.resize(int(j.size())-1);  // Resize to hold all relative poses
@@ -205,20 +276,35 @@ int main( int c, char** argv) {
         for (const auto& [timestamp, value] : j.items()) {
             bool detected = value.get<bool>();
             // std::cout << "  " << timestamp << " => " << (detected ? "Detected" : "Not Detected") << "\n";
-            if (first_index) {
+            if (first_index_lidar || timestamp.begin() == 'l') {
+                first_index_lidar = false;
+                // std::cout << "First timestamp: " << timestamp << std::endl;
+                pre_timestamp_lidar = timestamp.erase(timestamp.begin());  // Initialize the previous timestamp
+                continue;  // Skip the first iteration
+            }
+
+            else if (first_index || timestamp.begin() != 'l') {
                 pre_timestamp = timestamp;  // Initialize the previous timestamp
                 first_index = false;
                 continue;  // Skip the first iteration
             }
-            else{
+
+            else if (timestamp.begin() == 'l')
+            {
+                timestamp.erase(timestamp.begin());  // Remove the 'l' prefix
+                threads.emplace_back(lidar_rel_pose, pre_timestamp_lidar, timestamp, &rel_poses[rel_index]);
+                pre_timestamp_lidar = timestamp;
+            }
+            
+            else if(timestamp.begin() != 'l'){
                 // RelativePose rel_pose;
                 // Compute the relative pose between the previous and current timestamp
-                threads.emplace_back(compute_rel_pose, pre_timestamp, timestamp, &rel_poses[rel_index], &contour_poses[rel_index], rel_index);
+                threads.emplace_back(camera_rel_pose, pre_timestamp, timestamp, &rel_poses[rel_index], &contour_poses[rel_index], rel_index);
                 // Limit concurrent threads
-                if (threads.size() >= num_threads) {
-                    for (auto& t : threads) t.join();
-                    threads.clear();
-                }
+                // if (threads.size() >= num_threads) {
+                //     for (auto& t : threads) t.join();
+                //     threads.clear();
+                // }
                 // rel_poses.push_back(rel_pose);
                 if (!(contour_poses[rel_index].R.empty() && contour_poses[rel_index].t.empty())) {
                     // contour_pose.R, contour_pose.t = findContoursAndPose(timestamp);
@@ -226,13 +312,53 @@ int main( int c, char** argv) {
                     // contour_poses.push_back(CountourPose());
                     std::cout << "Contour detected at timestamp: " << timestamp << std::endl;
                 }
+                pre_timestamp = timestamp;
+            }
+            if (threads.size() >= num_threads) {
+                for (auto& t : threads) t.join();
+                threads.clear();
             }
             rel_index++;
-            pre_timestamp = timestamp;
+            
         }
         // Join remaining threads
         for (auto& t : threads) t.join();
         // std::cout << "Third poses: " << rel_poses[3].R << std::endl;
+
+        PoseFusionEKF::Params prm;
+        // If camera isn’t standard CV (x-right, y-down, z-forward), set your own T_body_from_cam here:
+        // prm.T_body_from_cam = your_rotation_or_full_extrinsic;
+
+        PoseFusionEKF ekf(prm);
+
+        Pose fused_poses;
+
+        for (const auto& rel_pose : rel_poses) {
+            if (rel_pose.valid && rel_pose.sensor_type == "camera") {
+                Eigen::Quaterniond q = ekf.quatFromSmallAngle(rel_pose.R.cast<double>());
+                Pose cam_pose{
+                    .p = rel_pose.t.cast<double>(),
+                    .q = q,
+                    .t = rel_pose.timestamp
+                };
+                ekf.pushCameraPose(cam_pose);
+            }
+            if (rel_pose.valid && rel_pose.sensor_type == "lidar") {
+                Eigen::Quaterniond q = ekf.quatFromSmallAngle(rel_pose.R.cast<double>());
+                Pose lidar_pose{
+                    .p = rel_pose.t.cast<double>(),
+                    .q = q,
+                    .t = rel_pose.timestamp
+                };
+                ekf.pushLidarPose(lidar_pose);
+            }
+
+            fused_poses = ekf.fusedPose();
+            // fused.p = fused.p.transpose(); // Convert to row vector
+            // std::cout << "Fused p: " << fused.p << "\n";
+            // std::cout << "Fused q (w x y z): " << fused.q.w() << " " << fused.q.vec().transpose() << "\n";
+        }
+
 
         json pose_array = json::array();  // holds all pose entries
         json contour_array = json::array();
@@ -242,14 +368,14 @@ int main( int c, char** argv) {
             for (const auto& cp : contour_poses) {
                 if (!cp.valid) continue;  // Skip invalid poses
                 countour_entry["contour_position"] = {
-                    {"x", cp.t.at<double>(0)},
-                    {"y", cp.t.at<double>(1)},
-                    {"z", cp.t.at<double>(2)}
+                    {"x", cp.t(0)},
+                    {"y", cp.t(1)},
+                    {"z", cp.t(2)}
                 };
                 countour_entry["contour_rotation"] = {
-                    {"x", cp.R.at<double>(0)},
-                    {"y", cp.R.at<double>(1)},
-                    {"z", cp.R.at<double>(2)}
+                    {"x", cp.R(0)},
+                    {"y", cp.R(1)},
+                    {"z", cp.R(2)}
                 };
                 countour_entry["contour_position_index"] = cp.position;
             }
@@ -262,25 +388,25 @@ int main( int c, char** argv) {
 
         // Add relative poses to the JSON array
 
-        for (const auto& rp : rel_poses) {
+        for (const auto& rp : fused_poses) {
             if (!rp.valid) continue;  // Skip invalid poses
-            json pose_entry;
-            pose_entry["drone_position"] = {
+            json camera_pose_entry;
+            camera_pose_entry["camera_drone_position"] = {
                 {"x", rp.t.at<double>(0)},
                 {"y", rp.t.at<double>(1)},
                 {"z", rp.t.at<double>(2)}
             };
-            pose_entry["drone_rotation"] = {
+            camera_pose_entry["camera_drone_rotation"] = {
                 {"x", rp.R.at<double>(0)},
                 {"y", rp.R.at<double>(1)},
                 {"z", rp.R.at<double>(2)}
             };
 
-            pose_array.push_back(pose_entry);  // add to array
+            pose_array.push_back(camera_pose_entry);  // add to array
         }
         // Wrap the array in a JSON object to send as a response
         
-        full_json["poses"] = pose_array;  // optionally wrap in another object
+        full_json["camera_poses"] = pose_array;  // optionally wrap in another object
         std::string response = full_json.dump();
         send(client_fd, response.c_str(), response.size(), 0);
 

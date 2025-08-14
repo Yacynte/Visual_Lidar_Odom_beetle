@@ -1,48 +1,16 @@
 #include <iostream>
 #include <fstream>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/registration/icp.h>
-#include <pcl/registration/gicp.h>
-#include <pcl/registration/ndt.h>
-// #include <pcl/io/pcd_io.h>
-// #include <pcl/point_types.h>
-// #include <pcl/filters/voxel_grid.h>
-// #include <pcl/features/normal_3d.h>
-// #include <pcl/features/fpfh.h>
-// #include <pcl/registration/sample_consensus_prerejective.h>
-// #include <pcl/visualization/pcl_visualizer.h>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <iostream>
 
+#include "receive_cloud.h"
 
-// Function to load .bin file into a point cloud
-// pcl::PointCloud<pcl::PointXYZ>::Ptr loadBinToPointCloud(const std::string& filename) {
-//     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-
-//     std::ifstream input(filename, std::ios::binary);
-//     if (!input) {
-//         std::cerr << "Failed to open " << filename << std::endl;
-//         return cloud;
-//     }
-
-//     while (!input.eof()) {
-//         float x, y, z, intensity;
-//         input.read(reinterpret_cast<char*>(&x), sizeof(float));
-//         input.read(reinterpret_cast<char*>(&y), sizeof(float));
-//         input.read(reinterpret_cast<char*>(&z), sizeof(float));
-//         input.read(reinterpret_cast<char*>(&intensity), sizeof(float));  // we ignore intensity
-
-//         if (input.gcount() < 16) break;  // avoid reading incomplete points
-
-//         cloud->points.emplace_back(x, y, z);
-//     }
-
-//     cloud->width = static_cast<uint32_t>(cloud->points.size());
-//     cloud->height = 1;
-//     cloud->is_dense = false;
-
-//     return cloud;
-// }
+const char* SERVER_IP = "192.168.1.100";
+const int SERVER_PORT = 6080;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr loadKittiBin(const std::string& path) {
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -53,17 +21,13 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr loadKittiBin(const std::string& path) {
         return cloud;
     }
 
-    // Each point is 4 floats (x, y, z, intensity)
+    // Each point is 3 floats (x, y, z)
     while (!input.eof()) {
         pcl::PointXYZ point;
         input.read(reinterpret_cast<char*>(&point.x), sizeof(float));
         input.read(reinterpret_cast<char*>(&point.y), sizeof(float));
         input.read(reinterpret_cast<char*>(&point.z), sizeof(float));
-        // input.read(reinterpret_cast<char*>(&point.intensity), sizeof(float));
-        // std::cout << "point: " << point.x << " " << point.y << " " << point.z << std::endl;
-        // if (input.gcount() == sizeof(float) * 3) {
-        //     cloud->push_back(point);
-        // }
+
         cloud->push_back(point);
     }
 
@@ -78,8 +42,49 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr loadKittiBin(const std::string& path) {
     return cloud;
 }
 
+int InitializeCom() {
+     // Create socket
+    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        std::cerr << "Failed to create socket\n";
+        return -1;
+    }
+
+    sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+
+    if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+        std::cerr << "Invalid server IP address\n";
+        close(sock_fd);
+        return -1;
+    }
+
+    // Connect to server
+    if (connect(sock_fd, (sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        std::cerr << "Connection to server failed\n";
+        close(sock_fd);
+        return -1;
+    }
+
+    std::cout << "Connected to server, waiting for lidar data...\n";
+    return sock_fd;
+}
+
+
 
 int main( int c, char** argv) {
+
+    // Initialize communication
+    int sock_fd = InitializeCom();
+    if (sock_fd < 0) {
+        std::cerr << "Failed to initialize communication\n";
+        return -1;
+    }
+    PointCloudReceiver point_cloud_receiver(sock_fd);
+    
+
     auto cloud1 = loadKittiBin("/home/divan/beetle/VisualOdometry/images/velodyne_points/data/0000000000.bin");
     auto cloud2 = loadKittiBin("/home/divan/beetle/VisualOdometry/images/velodyne_points/data/0000000001.bin");
 

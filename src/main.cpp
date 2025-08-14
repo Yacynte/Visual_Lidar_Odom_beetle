@@ -134,10 +134,11 @@ int main( int c, char** argv) {
             }
 
         
+            RelativePose rp;
+            cv::Mat r;
+            CountourPose contour_pose;
             if (!left_pre.empty() && !left_cur.empty() && !right_pre.empty() && !right_cur.empty()) {
-                RelativePose rp;
-                cv::Mat r;
-                CountourPose contour_pose;
+                
                 if (vo.StereoOdometry(left_cur_color, left_pre, left_cur, right_pre, right_cur, r, rp.t, &contour_pose)) {
                     cv::Rodrigues(r, rp.R);
                     rel_poses[int(i/skip)] = rp;
@@ -152,11 +153,17 @@ int main( int c, char** argv) {
                 }
                 std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
                 RelativePose marker_pose;
-                if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers)) {
+                if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers) && !contour_pose.valid) {
                     // std::cout << "Detected markers in frame pair: " << i << " and " << i + step << std::endl;
                     // Estimate pose of the markers
-                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, marker_pose.R, marker_pose.t);
-                    marker_pose.valid = true;
+                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose.R, contour_pose.t);
+                    contour_pose.position = i; // Store the position index
+                    contour_pose.valid = true;
+                    
+                }
+                if (contour_pose.valid){
+                    std::cout << "Contour pose valid for frame pair: " << i << " and " << i + step << std::endl;
+                    std::cout << "Contour pose translation: " << contour_pose.t << std::endl;
                 }
             }
         };

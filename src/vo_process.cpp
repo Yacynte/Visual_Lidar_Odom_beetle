@@ -1,21 +1,21 @@
 #include "vo_process.h"
 #include "visualodom.h"
-#include <ceres/ceres.h>
+#include "vo_ceres.h"
 
 
 // bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre_, cv::Mat leftImage_cur_, cv::Mat rightImage_pre_, cv::Mat rightImage_cur_, 
 //                                     cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
 
 bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_pre, cv::Mat leftImage_cur, cv::Mat rightImage_pre, cv::Mat rightImage_cur, 
-                                            cv::Mat& rotation_vector, cv::Mat& translation_vector, CountourPose* contour_pose) {
+                                            RelativePose* rel_pose, CountourPose* contour_pose) {
 
     // if (leftImage_pre_.empty(r << ) || leftImage_cur_.empty() || rightImage_pre_.empty() || rightImage_cur_.empty()) {
     if (leftImage_pre.empty() || leftImage_cur.empty() || rightImage_pre.empty() || rightImage_cur.empty()) {
         std::cerr << "One or all images are Empty!" << std::endl;
         UnityLog("One or all images are Empty!");
         // Initialize rotation and translation vectors to -1
-        cv::Mat rotation_vector = cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
-        cv::Mat translation_vector =cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
+        // cv::Mat rotation_vector = cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
+        // cv::Mat translation_vector =cv::Mat(3, 1, CV_32F, cv::Scalar(-1));
     }
 
     // Half the image size
@@ -49,12 +49,12 @@ bool VisualOdometry::StereoOdometry(cv::Mat leftImage_color, cv::Mat leftImage_p
     // std::cout<<"feature matching"<<std::endl;
     // feature_matching(leftImage_pre, leftImage_cur, pts_prev_L, pts_cur_L);
     matchWithSIFT(leftImage_pre, leftImage_cur, pts_prev_L, pts_cur_L);
-    matchWithSIFT(rightImage_pre, rightImage_cur, pts_prev_R, pts_cur_R);
+    // matchWithSIFT(rightImage_pre, rightImage_cur, pts_prev_R, pts_cur_R);
     int num_matching = pts_prev_L.size();
     // std::string message = "Number of matching points: " + std::to_string(num_matching);
     // UnityLog(message.c_str());
     // std::cout<<"Motion Estimation"<<std::endl;
-    bool state = motionEstimation(leftImage_color, pts_prev_L, pts_cur_L, pts_prev_R, pts_cur_R, depth_map, rotation_vector, translation_vector, leftImage_cur, contour_pose);
+    bool state = motionEstimation(leftImage_color, pts_prev_L, pts_cur_L, depth_map, rel_pose, leftImage_cur, contour_pose);
     
     return state;
 }
@@ -123,11 +123,15 @@ cv::Point3f VisualOdometry::computeMean3D(const std::vector<cv::Point3f>& points
 }
 
 bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std::vector<cv::Point2f>& image1_points_L,
-                                        const std::vector<cv::Point2f>& image2_points_L, const std::vector<cv::Point2f>& image1_points_R,
-                                        const std::vector<cv::Point2f>& image2_points_R, const cv::Mat& depth, cv::Mat& rvec, 
-                                        cv::Mat& translation_vector, cv::Mat leftImage_cur_, CountourPose* contour_pose) 
+                                        const std::vector<cv::Point2f>& image2_points_L, 
+                                        // const std::vector<cv::Point2f>& image1_points_R,
+                                        // const std::vector<cv::Point2f>& image2_points_R, 
+                                        const cv::Mat& depth, RelativePose* rel_pose, cv::Mat leftImage_cur_, CountourPose* contour_pose) 
 {
-    if (image1_points_L.size() != image2_points_L.size() || image1_points_R.size() != image2_points_R.size()) {
+    cv::Mat rotation_vector, translation_vector;
+    // if (image1_points_L.size() != image2_points_L.size() || image1_points_R.size() != image2_points_R.size()) {
+    if (image1_points_L.size() != image2_points_L.size())
+    {
         std::cerr << "Error: Point sets must have the same size." << std::endl;
         return false;
     }
@@ -136,27 +140,28 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
     std::vector<cv::Point3f> points_3D_L, points_3D_R;
     std::vector<size_t> outliers_L, outliers_R;
     reconstruct3D(image1_points_L, depth, points_3D_L, outliers_L);
-    reconstruct3D(image1_points_R, depth, points_3D_R, outliers_R);
+    // reconstruct3D(image1_points_R, depth, points_3D_R, outliers_R);
 
     std::vector<cv::Point2f> contourPoses2d;
     std::vector<cv::Point3f> contourPoses;
-    // if(detectContourMarkers(leftImage_cur_, contourPoses2d)){
-    //     reconstruct3D(contourPoses2d, depth, contourPoses, outliers, max_depth);
-    //     cv::Point3f meanPose = computeMean3D(contourPoses);
-    //     contour_pose->R = cv::Mat::eye(3, 3, CV_32F);
-    //     contour_pose->t = cv::Mat(meanPose);
-    //     contour_pose->valid = true;
-    // }
+    if(detectContourMarkers(leftImage_cur_, contourPoses2d)){
+        reconstruct3D(contourPoses2d, depth, contourPoses, outliers_L);
+        cv::Point3f meanPose = computeMean3D(contourPoses);
+        // contour_pose->R = cv::Mat::eye(3, 3, CV_32F);
+        // contour_pose->t = cv::Mat(meanPose);
+        contour_pose->t = Eigen::Vector3f(meanPose.x, meanPose.y, meanPose.z);
+        contour_pose->valid = true;
+    }
     
     // Step 2: Use an unordered_set for fast outlier lookup
     std::unordered_set<size_t> outlier_set_L(outliers_L.begin(), outliers_L.end());
-    std::unordered_set<size_t> outlier_set_R(outliers_R.begin(), outliers_R.end());
+    // std::unordered_set<size_t> outlier_set_R(outliers_R.begin(), outliers_R.end());
 
     // Filter points, reserving space to avoid multiple reallocations
     std::vector<cv::Point2f> filtered_image2_points_L, filtered_image2_points_R;
     std::vector<cv::Point3f> filtered_points_3D_L, filtered_points_3D_R;
     size_t num_points_L = image1_points_L.size();
-    size_t num_points_R = image1_points_R.size();
+    // size_t num_points_R = image1_points_R.size();
     // filtered_image1_points.reserve(image1_points.size());
     // filtered_image2_points.reserve(image2_points.size());
     // filtered_points_3D.reserve(points_3D.size());
@@ -170,30 +175,30 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
         }
     }
 
-    for (size_t i = 0; i < num_points_R; ++i) {
-        if (outlier_set_R.find(i) == outlier_set_R.end()) {
-            // filtered_image1_points.push_back(image1_points[i]);
-            filtered_image2_points_R.push_back(image2_points_R[i]);
-            // filtered_points_3D.push_back(points_3D[i]);
-        }
-    }
+    // for (size_t i = 0; i < num_points_R; ++i) {
+    //     if (outlier_set_R.find(i) == outlier_set_R.end()) {
+    //         // filtered_image1_points.push_back(image1_points[i]);
+    //         filtered_image2_points_R.push_back(image2_points_R[i]);
+    //         // filtered_points_3D.push_back(points_3D[i]);
+    //     }
+    // }
 
     // Step 3: Solve PnP with RANSAC
-    std::cout << "Left image points size: " << filtered_image2_points_L.size() << std::endl;
-    std::cout << " Left 3D points size: " << points_3D_L.size() << std::endl;
-    std::cout << " Left mage 1 points size: " << image1_points_L.size() << std::endl;
+    // std::cout << "Left image points size: " << filtered_image2_points_L.size() << std::endl;
+    // std::cout << " Left 3D points size: " << points_3D_L.size() << std::endl;
+    // std::cout << " Left mage 1 points size: " << image1_points_L.size() << std::endl;
 
-    std::cout << " Right image points size: " << filtered_image2_points_R.size() << std::endl;
-    std::cout << " Right 3D points size: " << points_3D_R.size() << std::endl;
-    std::cout << " Right mage 1 points size: " << image1_points_R.size() << std::endl;
+    // std::cout << " Right image points size: " << filtered_image2_points_R.size() << std::endl;
+    // std::cout << " Right 3D points size: " << points_3D_R.size() << std::endl;
+    // std::cout << " Right mage 1 points size: " << image1_points_R.size() << std::endl;
 
     cv::Mat filtered_points_3D_mat_L(points_3D_L), filtered_image2_points_mat_L(filtered_image2_points_L);
     filtered_points_3D_mat_L.convertTo(filtered_points_3D_mat_L, CV_32F);
     filtered_image2_points_mat_L.convertTo(filtered_image2_points_mat_L, CV_32F);
 
-    cv::Mat filtered_points_3D_mat_R(points_3D_R), filtered_image2_points_mat_R(filtered_image2_points_R);
-    filtered_points_3D_mat_R.convertTo(filtered_points_3D_mat_R, CV_32F);
-    filtered_image2_points_mat_R.convertTo(filtered_image2_points_mat_R, CV_32F);
+    // cv::Mat filtered_points_3D_mat_R(points_3D_R), filtered_image2_points_mat_R(filtered_image2_points_R);
+    // filtered_points_3D_mat_R.convertTo(filtered_points_3D_mat_R, CV_32F);
+    // filtered_image2_points_mat_R.convertTo(filtered_image2_points_mat_R, CV_32F);
     // std::vector<int> inliers;
     // std::string message = "Filtered image points size: " + std::to_string(filtered_image2_points_mat.size[0]);
     // UnityLog(message.c_str());
@@ -205,70 +210,34 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
     // std::cout << "Filtered 3D points size: " << filtered_points_3D_mat.size[0] << std::endl;
     // std::cout << "3D points: " << points_3D.size() << std::endl;
     std::vector<int> inliers_L, inliers_R; ;
-    cv::Mat rvec_L, tvec_L, rvec_R, tvec_R;
+    cv::Mat rvec_L, tvec_L, rvec_L_, rvec_R, tvec_R, rvec_R_, tvec_R_, rvec_R__ ;
     bool success_L = cv::solvePnPRansac(filtered_points_3D_mat_L, filtered_image2_points_mat_L, K1_float, 
-                                      D1_float, rvec_L, tvec_L, false, 100, 8.0, 0.99, inliers_L, cv::SOLVEPNP_ITERATIVE);
-    bool success_R = cv::solvePnPRansac(filtered_points_3D_mat_R, filtered_image2_points_mat_R, K2_float, 
-                                      D2_float, rvec_R, tvec_R, false, 100, 8.0, 0.99, inliers_R, cv::SOLVEPNP_ITERATIVE);
+                                      D1_float, rvec_L_, tvec_L, false, 500, 8.0, 0.99, inliers_L, cv::SOLVEPNP_ITERATIVE);
+    // bool success_R = cv::solvePnPRansac(filtered_points_3D_mat_R, filtered_image2_points_mat_R, K2_float, 
+    //                                   D2_float, rvec_R_, tvec_R_, false, 100, 8.0, 0.99, inliers_R, cv::SOLVEPNP_ITERATIVE);
    
+    // transform the pose from previous to current frame
+    Rodrigues(rvec_L_, rvec_L);
+    Rodrigues(rvec_L.inv(), rotation_vector);
+    translation_vector = tvec_L*-1; 
+    rel_pose->R = Eigen::Matrix3f(rotation_vector.at<float>(0), rotation_vector.at<float>(1), rotation_vector.at<float>(2));
+    rel_pose->t = Eigen::Vector3f(translation_vector.at<float>(0), translation_vector.at<float>(1), translation_vector.at<float>(2));
+    rel_pose->valid = success_L;
+    rel_pose->sensor_type = "camera"; // Assuming this is a camera pose
+    // Rodrigues(rvec_R_, rvec_R__);
+    // Rodrigues(rvec_R__.inv(), rvec_R);
     // std::cout << "Translation: " << rvec << std::endl;
     if (success_L == false){ std::cout << "RansacPnP Failed for left images \n";}
     // if (success_R == false){ std::cout << "RansacPnP Failed for right images \n";}
 
-    std::cout << "Transformation left: " << tvec_L << std::endl;
-    std::cout << "Transformation right: " << tvec_R << std::endl;
+    // std::cout << "Transformation left: " << translation_vector << std::endl;
+    // std::cout << "Transformation right: " << tvec_R << std::endl;
 
-    double camera_L[6], camera_R[6];
-    // rvec_L.convertTo(rvec_L, CV_64F);
-    // tvec_L.convertTo(tvec_L, CV_64F);
-    // rvec_R.convertTo(rvec_R, CV_64F);
-    // tvec_R.convertTo(tvec_R, CV_64F);
-    for (int i = 0; i < 3; ++i) {
-        camera_L[i] = rvec_L.at<double>(i);
-        camera_L[i + 3] = tvec_L.at<double>(i);
-        camera_R[i] = rvec_R.at<double>(i);
-        camera_R[i + 3] = tvec_R.at<double>(i);
-    }
-    // std::cout << "Camera L: " << camera_L[0] << ", " << camera_L[1] << ", " << camera_L[2] << ", "
-    //           << camera_L[3] << ", " << camera_L[4] << ", " << camera_L[5] << std::endl;
-    // fill camera[] with rvec (angle-axis) and tvec from OpenCV solvePnP (as double)
-    ceres::Problem problem;
-    for(size_t i=0;i<inliers_L.size();++i) {
-        int idx = inliers_L[i];
-        ceres::CostFunction* cf = ReprojectionError::Create(points_3D_L[idx], filtered_image2_points_L[idx], K1_float);
-        ceres::LossFunction* loss = new ceres::HuberLoss(1.0);
-        problem.AddResidualBlock(cf, loss, camera_L);
-    }
+    // optimizePoseWithCeres(inliers_L, inliers_R, filtered_points_3D_mat_L, filtered_image2_points_mat_L, filtered_points_3D_mat_R, filtered_image2_points_mat_R, rotation_vector, translation_vector);
 
-    for(size_t i=0;i<inliers_R.size();++i) {
-        int idx = inliers_R[i];
-        ceres::CostFunction* cf = ReprojectionError::Create(points_3D_R[idx], filtered_image2_points_R[idx], K2_float);
-        ceres::LossFunction* loss = new ceres::HuberLoss(1.0);
-        problem.AddResidualBlock(cf, loss, camera_R);
-    }
 
-    // Optionally: keep scale or impose a small prior on translation magnitude:
-    // ceres::CostFunction* prior =
-    //     new ceres::AutoDiffCostFunction<TranslationPrior,3,6>(new TranslationPrior(initial_t));
-    // problem.AddResidualBlock(prior, new ceres::ScaledLoss(nullptr, 1e-4, ceres::TAKE_OWNERSHIP), camera);
 
-    // Solve
-    ceres::Solver::Options options;
-    options.minimizer_progress_to_stdout = true;
-    ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
-
-    std::cout << summary.FullReport() << "\n";
-
-    rvec_L.convertTo(rvec, CV_64F);
-    tvec_L.convertTo(translation_vector, CV_64F);
-    
-    for (int i = 0; i < 3; ++i) {
-        rvec.at<double>(i) = camera_L[i];
-        translation_vector.at<double>(i) = camera_L[i + 3];
-    }
-
-    return success_L && success_R; // Return true if both PnP solutions were successful
+    return success_L; // Return true if both PnP solutions were successful
     
 }
 
@@ -497,7 +466,7 @@ void VisualOdometry::matchWithSIFT(const cv::Mat& img1, const cv::Mat& img2,
         pts2.push_back(filtered_keypoints2[match.trainIdx].pt);
     }
 
-    std::cout << "filtered_keypoints found: " << pts1.size() << "\n";
+    // std::cout << "filtered_keypoints found: " << pts1.size() << "\n";
 
     // // Optional: draw matches
     // cv::Mat img_matches;
@@ -609,7 +578,7 @@ std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> VisualOdometry::ma
 void VisualOdometry::estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat& imageRight,
                                         std::map<int, MarkerInfo>& detectedLeftMarkers,
                                         std::map<int, MarkerInfo>& detectedRightMarkers,
-                                        cv::Mat& rvec, cv::Mat& tvec) {
+                                        CountourPose* contour_pose) {
 
 
     auto matchedPoints = matchMarkerCorners(detectedLeftMarkers, detectedRightMarkers);
@@ -624,8 +593,11 @@ void VisualOdometry::estimateMarkersPose(const cv::Mat& imageLeft, const cv::Mat
         std::vector<cv::Point2f> leftImagePoints = matchedPoints.first; // from ArUco detection
         std::vector<cv::Point2f> RightImagePoints = matchedPoints.second; 
         
+        cv::Mat rvec, tvec;
         cv::solvePnPRansac(aruco_objectPoints, leftImagePoints, K1_float, D1_float, rvec, tvec);
 
+        Eigen::Vector3f translation(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+        contour_pose->t = translation;
 
     }
 }
@@ -658,3 +630,55 @@ bool VisualOdometry::detectContourMarkers(const cv::Mat& image, std::vector<cv::
     return !contoursOut.empty();
 }
 
+
+void VisualOdometry::optimizePoseWithCeres( std::vector<int> inliers_L, std::vector<int> inliers_R, 
+                                            const cv::Mat& points3D_L, const cv::Mat& points2D_L,
+                                            const cv::Mat& points3D_R, const cv::Mat& points2D_R,
+                                            cv::Mat& rvec_degree, cv::Mat& tvec)
+{
+    // using namespace vo_ceres;
+    double camera[6];
+
+    cv::Mat rvec = vo_ceres::deg2rad_vec(rvec_degree);
+    for (int i = 0; i < 3; ++i) {
+        camera[i]     = rvec.at<double>(i);
+        camera[i + 3] = tvec.at<double>(i);
+    }
+
+    ceres::Problem problem;
+    for (int idx : inliers_L) {
+        ceres::CostFunction* cf = vo_ceres::ReprojectionLeft::Create(
+            points3D_L.at<cv::Point3f>(idx),
+            points2D_L.at<cv::Point2f>(idx),
+            K1);
+        ceres::LossFunction* loss = new ceres::HuberLoss(1.0);
+        problem.AddResidualBlock(cf, loss, camera);
+    }
+    cv::Mat r_lr_ = R*R2;
+    cv::Mat t_lr_ = T2 - T;
+    for (int idx : inliers_R) {
+        ceres::CostFunction* cf_r = vo_ceres::ReprojectionRight::Create(
+            points3D_R.at<cv::Point3f>(idx),
+            points2D_R.at<cv::Point2f>(idx),
+            K2, r_lr_, t_lr_);
+        ceres::LossFunction* loss = new ceres::HuberLoss(1.0);
+        problem.AddResidualBlock(cf_r, loss, camera);
+    }
+
+    // problem.SetParameterBlockConstant(camera);
+
+    // Solve the problem using Ceres
+    ceres::Solver::Options options;
+    options.minimizer_progress_to_stdout = true;
+    options.linear_solver_type = ceres::DENSE_QR;
+
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    std::cout << summary.FullReport() << "\n";
+
+    for (int i = 0; i < 3; ++i) {
+        rvec.at<double>(i) = camera[i];
+        tvec.at<double>(i) = camera[i + 3];
+    }
+}
