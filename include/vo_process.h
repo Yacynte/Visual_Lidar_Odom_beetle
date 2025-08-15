@@ -52,8 +52,8 @@ struct RelativePose {
 
 struct CountourPose {
         // cv::Mat R, t;
-        Eigen::Matrix3f R = Eigen::Vector3f::Zero();
-        Eigen::Vector3f t;
+        Eigen::Vector3f R = Eigen::Vector3f::Zero();
+        Eigen::Vector3f t = Eigen::Vector3f::Zero();
         int position;
         bool valid = false;
     };

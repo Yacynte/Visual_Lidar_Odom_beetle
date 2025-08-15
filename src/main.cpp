@@ -156,7 +156,7 @@ int main( int c, char** argv) {
                 if (vo.detectArucoMarkers(left_cur, detectLeftMarkers) && vo.detectArucoMarkers(right_cur, detectRightMarkers) && !contour_pose.valid) {
                     // std::cout << "Detected markers in frame pair: " << i << " and " << i + step << std::endl;
                     // Estimate pose of the markers
-                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose.R, contour_pose.t);
+                    vo.estimateMarkersPose(left_cur, right_cur, detectLeftMarkers, detectRightMarkers, contour_pose);
                     contour_pose.position = i; // Store the position index
                     contour_pose.valid = true;
                     
@@ -196,10 +196,16 @@ int main( int c, char** argv) {
         for (int i = std::max(0, int(old_frames/skip)); i <= rel_poses.size()-1; ++i) {
             if (!rel_poses[i].valid) continue;
 
+            cv::Mat R_vec, t_vec, R_mat;
+            for (int j = 0; j < 3; ++j) {
+                R_vec.at<double>(j) = rel_poses[i].R(j);
+                t_vec.at<double>(j) = rel_poses[i].t(j);
+            }
+            cv::Rodrigues(R_vec, R_mat);
             // t' = t + R * t_i
-            t_global += R_global * rel_poses[i].t;
+            t_global += R_global * t_vec;
             // R' = R * R_i
-            R_global = R_global * rel_poses[i].R;
+            R_global = R_global * R_mat;
             
             // std::cout << "Updating pose for frame pair: " << i << " and " << i + 1 << std::endl;
         }

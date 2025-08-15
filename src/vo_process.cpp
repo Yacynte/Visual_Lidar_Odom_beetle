@@ -220,7 +220,7 @@ bool VisualOdometry::motionEstimation(const cv::Mat& leftImage_color, const std:
     Rodrigues(rvec_L_, rvec_L);
     Rodrigues(rvec_L.inv(), rotation_vector);
     translation_vector = tvec_L*-1; 
-    rel_pose->R = Eigen::Matrix3f(rotation_vector.at<float>(0), rotation_vector.at<float>(1), rotation_vector.at<float>(2));
+    rel_pose->R = Eigen::Vector3f(rotation_vector.at<float>(0), rotation_vector.at<float>(1), rotation_vector.at<float>(2));
     rel_pose->t = Eigen::Vector3f(translation_vector.at<float>(0), translation_vector.at<float>(1), translation_vector.at<float>(2));
     rel_pose->valid = success_L;
     rel_pose->sensor_type = "camera"; // Assuming this is a camera pose

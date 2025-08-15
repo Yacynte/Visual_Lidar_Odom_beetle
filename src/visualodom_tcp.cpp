@@ -5,7 +5,7 @@
 #include "vo_process.h"
 #include "visualodom.h"
 #include "receive_cloud.h"
-#include "PoseFusionEKF.hpp"
+#include "PoseFusionEKF.h"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -122,7 +122,7 @@ int main( int c, char** argv) {
                 std::ifstream target_input(target_path, std::ios::binary);
                 if (!source_input || !target_input) {
                     std::cerr << "Failed to open source or target file." << std::endl;
-                    return false;
+                    return;
                 }
                 // Each point is 2 floats (x, y)
                 while (!source_input.eof()) {
@@ -140,8 +140,8 @@ int main( int c, char** argv) {
                     source_point.z = 0.0f;
                     target_point.z = 0.0f;
 
-                    source.push_back(source_point);
-                    target.push_back(target_point);
+                    source->push_back(source_point);
+                    target->push_back(target_point);
                 }
 
                 
@@ -201,24 +201,24 @@ int main( int c, char** argv) {
             cv::Mat rel_R, rel_t;
             // std::vector<cv::Point3f> contour_poses;
             try{
-                if (vo.StereoOdometry(left_pre_color, left_pre, left_cur, right_pre, right_cur, rel_R, rel_t, contour_pose)) {
-                    cv::Rodrigues(rel_R, rp);
+                if (vo.StereoOdometry(left_pre_color, left_pre, left_cur, right_pre, right_cur, rel_pose, contour_pose)) {
+                    // cv::Rodrigues(rel_R, rp);
                     std::cout << "Calculated relative pose: " << rel_t << std::endl;
                     // std::string message2 = "Calculated relative pose: {}" + std::to_string(rel_t);
                     // UnityLog(message2.c_str());  
-                    rel_pose->valid = true;
+                    // rel_pose->valid = true;
                     if(contour_pose->valid) {
                         contour_pose->position = rel_index; // Store the position index
                     }
                     
                 }
-                else {
-                    std::cerr << "StereoOdometry failed for images: " << pre_image << " and " << current_image << std::endl;
-                    rel_pose->valid = false;
-                }
-                rel_pose->R = rp;
-                rel_pose->t = rel_t;
-                rel_pose->sensor_type = "camera"; // Set sensor type
+                // else {
+                //     std::cerr << "StereoOdometry failed for images: " << pre_image << " and " << current_image << std::endl;
+                //     rel_pose->valid = false;
+                // }
+                // rel_pose->R = rp;
+                // rel_pose->t = rel_t;
+                // rel_pose->sensor_type = "camera"; // Set sensor type
                 rel_pose->timestamp = std::stof(current_image); // Convert timestamp to float
 
                 std::map<int, MarkerInfo> detectLeftMarkers, detectRightMarkers;
@@ -273,30 +273,31 @@ int main( int c, char** argv) {
         rel_poses.resize(int(j.size())-1);  // Resize to hold all relative poses
         contour_poses.resize(int(j.size())-1);  // Resize to hold all contour poses except the first one
         // CountourPose contour_pose;
-        for (const auto& [timestamp, value] : j.items()) {
+        for (auto& [timestamp_, value] : j.items()) {
+            std::string timestamp = timestamp_;
             bool detected = value.get<bool>();
             // std::cout << "  " << timestamp << " => " << (detected ? "Detected" : "Not Detected") << "\n";
-            if (first_index_lidar || timestamp.begin() == 'l') {
+            if (first_index_lidar || timestamp[0] == 'l') {
                 first_index_lidar = false;
                 // std::cout << "First timestamp: " << timestamp << std::endl;
-                pre_timestamp_lidar = timestamp.erase(timestamp.begin());  // Initialize the previous timestamp
+                pre_timestamp_lidar = timestamp.substr(1);  // Initialize the previous timestamp
                 continue;  // Skip the first iteration
             }
 
-            else if (first_index || timestamp.begin() != 'l') {
+            else if (first_index || timestamp[0] != 'l') {
                 pre_timestamp = timestamp;  // Initialize the previous timestamp
                 first_index = false;
                 continue;  // Skip the first iteration
             }
 
-            else if (timestamp.begin() == 'l')
+            else if (timestamp[0] == 'l')
             {
                 timestamp.erase(timestamp.begin());  // Remove the 'l' prefix
                 threads.emplace_back(lidar_rel_pose, pre_timestamp_lidar, timestamp, &rel_poses[rel_index]);
                 pre_timestamp_lidar = timestamp;
             }
             
-            else if(timestamp.begin() != 'l'){
+            else if(timestamp[0] != 'l'){
                 // RelativePose rel_pose;
                 // Compute the relative pose between the previous and current timestamp
                 threads.emplace_back(camera_rel_pose, pre_timestamp, timestamp, &rel_poses[rel_index], &contour_poses[rel_index], rel_index);
@@ -306,7 +307,7 @@ int main( int c, char** argv) {
                 //     threads.clear();
                 // }
                 // rel_poses.push_back(rel_pose);
-                if (!(contour_poses[rel_index].R.empty() && contour_poses[rel_index].t.empty())) {
+                if (!(contour_poses[rel_index].t.isZero())) {
                     // contour_pose.R, contour_pose.t = findContoursAndPose(timestamp);
                     // contour_poses[irr].position = irr;
                     // contour_poses.push_back(CountourPose());
@@ -331,7 +332,8 @@ int main( int c, char** argv) {
 
         PoseFusionEKF ekf(prm);
 
-        Pose fused_poses;
+        std::vector<Pose> fused_poses;
+        ekf.reset(); // Reset EKF state
 
         for (const auto& rel_pose : rel_poses) {
             if (rel_pose.valid && rel_pose.sensor_type == "camera") {
@@ -353,7 +355,7 @@ int main( int c, char** argv) {
                 ekf.pushLidarPose(lidar_pose);
             }
 
-            fused_poses = ekf.fusedPose();
+            fused_poses.push_back(ekf.fusedPose());
             // fused.p = fused.p.transpose(); // Convert to row vector
             // std::cout << "Fused p: " << fused.p << "\n";
             // std::cout << "Fused q (w x y z): " << fused.q.w() << " " << fused.q.vec().transpose() << "\n";
@@ -391,22 +393,24 @@ int main( int c, char** argv) {
         for (const auto& rp : fused_poses) {
             if (!rp.valid) continue;  // Skip invalid poses
             json camera_pose_entry;
-            camera_pose_entry["camera_drone_position"] = {
-                {"x", rp.t.at<double>(0)},
-                {"y", rp.t.at<double>(1)},
-                {"z", rp.t.at<double>(2)}
+            camera_pose_entry["drone_position"] = {
+                {"x", rp.p(0)},
+                {"y", rp.p(1)},
+                {"z", rp.p(2)}
             };
-            camera_pose_entry["camera_drone_rotation"] = {
-                {"x", rp.R.at<double>(0)},
-                {"y", rp.R.at<double>(1)},
-                {"z", rp.R.at<double>(2)}
+            std::cout << "Drone position: " << rp.p.transpose() << std::endl;
+            camera_pose_entry["drone_rotation"] = {
+                // {"w", rp.q.w()},
+                {"x", rp.q.x()},
+                {"y", rp.q.y()},
+                {"z", rp.q.z()}
             };
 
             pose_array.push_back(camera_pose_entry);  // add to array
         }
         // Wrap the array in a JSON object to send as a response
         
-        full_json["camera_poses"] = pose_array;  // optionally wrap in another object
+        full_json["drone_poses"] = pose_array;  // optionally wrap in another object
         std::string response = full_json.dump();
         send(client_fd, response.c_str(), response.size(), 0);
 

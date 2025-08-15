@@ -44,6 +44,8 @@ add_library(VisualOdometry SHARED
     src/vo_process.cpp
     src/visualodom.cpp
     src/vo_ceres.cpp # Include the Ceres optimization implementation
+    src/receive_cloud.cpp # Include the PCD processing implementation
+    src/PoseFusionEKF.cpp # Include the PoseFusionEKF implementation
     # visual odometry implementation
 )
 
@@ -80,16 +82,13 @@ set_target_properties(VisualOdometry PROPERTIES
 
 
 # to build the executable for testing purposes
-add_executable(VisualOdometry_exe
-                src/main.cpp # Assuming you have a separate main.cpp for testing
-                src/vo_process.cpp
-                src/vo_ceres.cpp # Include the Ceres optimization implementation
-                )
+# add_executable(VisualOdometry_exe
+#                 src/main.cpp # Assuming you have a separate main.cpp for testing
+#                 )
 
 # Build a separate executable for TCP communication
 add_executable(VisualOdometry_tcp
                 src/visualodom_tcp.cpp # TCP communication implementation
-                src/vo_ceres.cpp # Include the Ceres optimization implementation
                 )
 
 add_executable(icp_pcd
@@ -101,16 +100,16 @@ target_link_libraries(icp_pcd
                         ${PCL_LIBRARIES}
                         ${OpenCV_LIBS}
                         pthread
-                        # VisualOdometry # Link against the shared library
+                        VisualOdometry # Link against the shared library
                     )
 
-target_link_libraries(VisualOdometry_exe
-                        nlohmann_json::nlohmann_json
-                        pthread
-                        ${OpenCV_LIBS}
-                        VisualOdometry # Link against the shared library
-                        Ceres::ceres # Link against Ceres Solver
-                        )
+# target_link_libraries(VisualOdometry_exe
+#                         nlohmann_json::nlohmann_json
+#                         pthread
+#                         ${OpenCV_LIBS}
+#                         VisualOdometry # Link against the shared library
+#                         Ceres::ceres # Link against Ceres Solver
+#                         )
 
 target_link_libraries(VisualOdometry_tcp
                         nlohmann_json::nlohmann_json
